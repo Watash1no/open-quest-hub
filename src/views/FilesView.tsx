@@ -5,7 +5,7 @@ import { useAppStore } from "../store/useAppStore";
 
 export function FilesView() {
   const { files, currentPath, isLoading, navigate, navigateUp, downloadFile, refresh, fileTransferProgress } = useFiles();
-  const selectedDevice = useAppStore((s) => s.selectedDevice);
+  const selectedDevice = useAppStore((s) => s.selectedSerial);
 
   const quickPaths = [
     { name: "Internal Storage", path: "/sdcard", icon: <Smartphone size={14} /> },

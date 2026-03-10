@@ -2,10 +2,11 @@ mod adb;
 mod error;
 mod models;
 
-use adb::devices::list_devices;
-use adb::apps::{list_packages, uninstall_app, launch_app, install_apk};
-use adb::logcat::{start_logcat, stop_logcat, LogcatManager};
+use adb::devices::{list_devices, get_adb_status};
+use adb::apps::{list_packages, uninstall_app, launch_app, stop_app, install_apk};
+use adb::logcat::{start_logcat, stop_logcat, stop_all_logcat, LogcatManager};
 use adb::files::{list_files, pull_file};
+use adb::controls::{toggle_boundary, enable_wifi_adb, disable_wifi_adb, take_screenshot, record_video, cast_device, get_device_ip, connect_device_ip};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -19,11 +20,22 @@ pub fn run() {
             list_packages,
             uninstall_app,
             launch_app,
+            stop_app,
             install_apk,
             start_logcat,
             stop_logcat,
+            stop_all_logcat,
             list_files,
             pull_file,
+            get_adb_status,
+            toggle_boundary,
+            enable_wifi_adb,
+            disable_wifi_adb,
+            take_screenshot,
+            record_video,
+            cast_device,
+            get_device_ip,
+            connect_device_ip,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

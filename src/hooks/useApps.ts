@@ -8,52 +8,103 @@ import type { Package } from "../types";
  * Hook for managing installed apps on the selected device.
  */
 export function useApps() {
-  const selectedDevice = useAppStore((s) => s.selectedDevice);
+  const selectedDevice = useAppStore((s) => s.selectedSerial);
   const [packages, setPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const fetchPackages = useCallback(async () => {
+  const fetchPackages = useCallback(async (isPolling = false) => {
     if (!selectedDevice) {
       setPackages([]);
       return;
     }
 
-    setIsLoading(true);
+    if (!isPolling) setIsLoading(true);
     try {
       const pkgs = await invoke<Package[]>("list_packages", { deviceId: selectedDevice });
-      setPackages(pkgs);
-    } catch (err) {
-      console.error("Failed to list packages:", err);
-      toast.error("Failed to list apps", {
-        description: String(err),
+      
+      // Strict sorting: 1. Running status, 2. Install date (newest first)
+      const sorted = [...pkgs].sort((a, b) => {
+        if (a.running !== b.running) return a.running ? -1 : 1;
+        const dateA = a.installDate ? new Date(a.installDate).getTime() : 0;
+        const dateB = b.installDate ? new Date(b.installDate).getTime() : 0;
+        return dateB - dateA;
       });
+
+      setPackages(sorted.slice(0, 5));
+    } catch (err) {
+      if (!isPolling) {
+        console.error("Failed to list packages:", err);
+        toast.error("Failed to list apps", { description: String(err) });
+      }
     } finally {
-      setIsLoading(false);
+      if (!isPolling) setIsLoading(false);
     }
   }, [selectedDevice]);
 
+  // Handle polling and initial fetch
   useEffect(() => {
-    fetchPackages();
-  }, [fetchPackages]);
+    if (!selectedDevice) {
+      setPackages([]);
+      return;
+    }
+
+    let isMounted = true;
+    let timeoutId: number;
+
+    const poll = async () => {
+      // Don't poll if the component is unmounted or if we're already loading (primary fetch)
+      if (!isMounted) return;
+      
+      await fetchPackages(true);
+      
+      if (isMounted) {
+        timeoutId = window.setTimeout(poll, 5000);
+      }
+    };
+
+    fetchPackages(); // Initial primary fetch
+    timeoutId = window.setTimeout(poll, 5000);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [selectedDevice, fetchPackages]);
 
   const launchApp = async (packageName: string) => {
     if (!selectedDevice) return;
     try {
+      // Optimistic update for "snappy" feel
+      setPackages(prev => prev.map(p => p.name === packageName ? { ...p, running: true } : p));
       await invoke("launch_app", { deviceId: selectedDevice, package: packageName });
-      toast.success("App launched", { description: packageName });
+      toast.success("App launched");
     } catch (err) {
+      // Revert if failed
+      setPackages(prev => prev.map(p => p.name === packageName ? { ...p, running: false } : p));
       toast.error("Launch failed", { description: String(err) });
+    }
+  };
+
+  const stopApp = async (packageName: string) => {
+    if (!selectedDevice) return;
+    try {
+      // Optimistic update
+      setPackages(prev => prev.map(p => p.name === packageName ? { ...p, running: false } : p));
+      await invoke("stop_app", { deviceId: selectedDevice, package: packageName });
+      toast.success("App stopped");
+    } catch (err) {
+      // Revert
+      setPackages(prev => prev.map(p => p.name === packageName ? { ...p, running: true } : p));
+      toast.error("Failed to stop app");
     }
   };
 
   const uninstallApp = async (packageName: string) => {
     if (!selectedDevice) return;
-    
-    // In a real app, you'd show a confirmation dialog first
     try {
       await invoke("uninstall_app", { deviceId: selectedDevice, package: packageName });
       toast.success("App uninstalled");
-      fetchPackages(); // Refresh list
+      fetchPackages();
     } catch (err) {
       toast.error("Uninstall failed", { description: String(err) });
     }
@@ -64,6 +115,7 @@ export function useApps() {
     isLoading,
     refresh: fetchPackages,
     launchApp,
+    stopApp, // Expose stopApp
     uninstallApp,
   };
 }

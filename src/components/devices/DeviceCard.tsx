@@ -60,9 +60,30 @@ export function DeviceCard({ device, isSelected, onSelect, onRefresh }: DeviceCa
             justifyContent: "center",
             flexShrink: 0,
             fontSize: "18px",
+            position: "relative",
           }}
         >
           🥽
+          {device.connectionTypes.includes("WiFi") && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: "-4px",
+                right: "-4px",
+                background: "var(--color-accent)",
+                borderRadius: "50%",
+                width: "14px",
+                height: "14px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: "2px solid var(--color-surface-card)",
+                boxShadow: "0 0 10px var(--color-accent-muted)",
+              }}
+            >
+              <Wifi size={8} color="#fff" strokeWidth={3} />
+            </div>
+          )}
         </div>
 
         {/* Model + serial */}
@@ -90,7 +111,7 @@ export function DeviceCard({ device, isSelected, onSelect, onRefresh }: DeviceCa
               textOverflow: "ellipsis",
             }}
           >
-            {device.id}
+            {device.serial}
           </div>
         </div>
 
@@ -145,23 +166,21 @@ export function DeviceCard({ device, isSelected, onSelect, onRefresh }: DeviceCa
           </span>
         )}
 
-        {/* Connection type */}
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "3px",
-            fontSize: "11px",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          {device.connectionType === "WiFi" ? (
-            <Wifi size={11} strokeWidth={2} />
-          ) : (
-            <Usb size={11} strokeWidth={2} />
+        {/* Connection types */}
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          {device.connectionTypes.includes("USB") && (
+             <span title="USB Connection" style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "11px", color: "var(--color-text-secondary)" }}>
+               <Usb size={11} strokeWidth={2} />
+               USB
+             </span>
           )}
-          {device.connectionType}
-        </span>
+          {device.connectionTypes.includes("WiFi") && (
+             <span title="WiFi Connection" style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "11px", color: "var(--color-text-secondary)" }}>
+               <Wifi size={11} strokeWidth={2} />
+               WiFi
+             </span>
+          )}
+        </div>
 
         {/* Battery */}
         {device.batteryLevel !== null && (

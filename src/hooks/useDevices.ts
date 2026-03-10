@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { useAppStore } from "../store/useAppStore";
 import type { Device } from "../types";
@@ -16,13 +16,14 @@ export function useDevices() {
   const pollInterval = useAppStore((s) => s.settings.pollInterval);
   const setDevices = useAppStore((s) => s.setDevices);
   const setSelectedDevice = useAppStore((s) => s.setSelectedDevice);
-  const selectedDevice = useAppStore((s) => s.selectedDevice);
+  const selectedSerial = useAppStore((s) => s.selectedSerial);
   const setAdbStatus = useAppStore((s) => s.setAdbStatus);
   const adbErrorShownRef = useRef(false);
 
-  const fetchDevices = async () => {
+  const fetchDevices = useCallback(async () => {
     try {
-      setAdbStatus("loading"); // Set status to loading before invoking
+      // Only set loading on first mount or when explicitly requested? 
+      // For background polling, we want silent updates.
       const devices = await invoke<Device[]>("list_devices");
       setAdbStatus("ready");
       setDevices(devices);
@@ -31,18 +32,19 @@ export function useDevices() {
       adbErrorShownRef.current = false;
 
       // Auto-select first device if none selected
-      if (devices.length > 0 && !selectedDevice) {
-        setSelectedDevice(devices[0].id);
+      if (devices.length > 0 && !selectedSerial) {
+        setSelectedDevice(devices[0].serial);
       }
 
       // Deselect if the selected device disappeared
-      if (selectedDevice && !devices.find((d) => d.id === selectedDevice)) {
-        setSelectedDevice(devices[0]?.id ?? null);
+      if (selectedSerial && !devices.find((d) => d.serial === selectedSerial)) {
+        setSelectedDevice(devices[0]?.serial ?? null);
         toast.warning("Device disconnected", {
           description: "The active device was disconnected.",
         });
       }
     } catch (err: unknown) {
+      // ... same error handling logic ...
       const msg = String(err);
       const isAdbMissing =
         msg.includes("AdbNotFound") ||
@@ -53,7 +55,7 @@ export function useDevices() {
         adbErrorShownRef.current = true;
         setAdbStatus("not_found");
         toast.error("ADB not found", {
-          description: "Install ADB or set the path in Settings.\nLinux: sudo apt install adb",
+          description: "Install ADB or set the path in Settings.",
           duration: 8000,
         });
       } else if (!isAdbMissing) {
@@ -61,27 +63,37 @@ export function useDevices() {
         console.error("[useDevices] list_devices error:", err);
       }
     }
-  };
+  }, [selectedSerial, setDevices, setSelectedDevice, setAdbStatus]);
 
   useEffect(() => {
-    // Fetch immediately, then poll
-    fetchDevices();
-    const interval = setInterval(fetchDevices, pollInterval || DEFAULT_POLL_INTERVAL_MS);
+    let isMounted = true;
+    let timeoutId: number;
+
+    const poll = async () => {
+      if (!isMounted) return;
+      await fetchDevices();
+      if (isMounted) {
+        timeoutId = window.setTimeout(poll, pollInterval || DEFAULT_POLL_INTERVAL_MS);
+      }
+    };
+
+    poll(); // Initial immediate poll
 
     // Listen for push-based `devices-updated` events (future backend feature)
     let unlisten: (() => void) | null = null;
     import("@tauri-apps/api/event").then(({ listen }) => {
       listen<Device[]>("devices-updated", (event) => {
-        setDevices(event.payload);
+        if (isMounted) setDevices(event.payload);
       }).then((fn) => {
-        unlisten = fn;
+        if (isMounted) unlisten = fn;
+        else fn(); // clean up immediately if unmounted during import
       });
     });
 
     return () => {
-      clearInterval(interval);
+      isMounted = false;
+      window.clearTimeout(timeoutId);
       if (unlisten) unlisten();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pollInterval]);
+  }, [pollInterval, fetchDevices, setDevices]);
 }

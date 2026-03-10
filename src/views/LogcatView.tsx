@@ -5,7 +5,7 @@ import { useLogcat } from "../hooks/useLogcat";
 import { useAppStore } from "../store/useAppStore";
 
 export function LogcatView() {
-  const selectedDevice = useAppStore((s) => s.selectedDevice);
+  const selectedDevice = useAppStore((s) => s.selectedSerial);
   
   // Use the hook to handle streaming
   useLogcat();

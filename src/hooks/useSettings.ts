@@ -17,7 +17,7 @@ export function useSettings() {
     } catch (err) {
       console.error("Failed to load settings:", err);
     }
-  }, [setSettings, settings]);
+  }, [setSettings]); // Removed 'settings' from deps
 
   useEffect(() => {
     loadSettings();

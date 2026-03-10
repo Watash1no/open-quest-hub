@@ -3,14 +3,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    #[error("ADB not found. Install it via 'sudo apt install android-tools-adb' or set ANDROID_HOME.")]
+    #[error("ADB not found. Please install Android Platform Tools or set ANDROID_HOME environment variable.")]
     AdbNotFound,
 
     #[error("ADB command failed: {0}")]
     CommandFailed(String),
 
-    #[error("Failed to parse ADB output: {0}")]
-    ParseError(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -38,7 +36,6 @@ impl AppError {
         match self {
             AppError::AdbNotFound => "ADB_NOT_FOUND",
             AppError::CommandFailed(_) => "COMMAND_FAILED",
-            AppError::ParseError(_) => "PARSE_ERROR",
             AppError::Io(_) => "IO_ERROR",
             AppError::InstallFailed(_) => "INSTALL_FAILED",
         }

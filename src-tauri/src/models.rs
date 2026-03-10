@@ -5,21 +5,22 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Device {
-    pub id: String,              // ADB serial (e.g. "1A2B3C4D" or "192.168.1.x:5555")
+    pub id: String,              // ADB identifier (either serial or IP:port)
+    pub serial: String,          // Hardware serial number (ro.serialno)
     pub model: String,           // ro.product.model
     pub android_version: String, // ro.build.version.release
     pub battery_level: i32,      // 0–100, -1 if unavailable
-    pub connection_type: ConnectionType,
+    pub connection_types: Vec<ConnectionType>,
     pub status: DeviceStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ConnectionType {
     Usb,
     WiFi,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum DeviceStatus {
     Online,
     Unauthorized,
@@ -44,6 +45,8 @@ pub struct Package {
     pub name: String,
     pub label: Option<String>,
     pub version: Option<String>,
+    pub install_date: Option<String>,
+    pub running: bool,
 }
 
 // ─── FileEntry ───────────────────────────────────────────────────────────────

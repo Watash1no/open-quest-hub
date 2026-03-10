@@ -15,11 +15,11 @@ import { useAppStore } from "../../store/useAppStore";
 
 export function DeviceTopBar() {
   const devices = useAppStore((s) => s.devices);
-  const selectedId = useAppStore((s) => s.selectedDevice);
+  const selectedSerial = useAppStore((s) => s.selectedSerial);
   const setSelectedDevice = useAppStore((s) => s.setSelectedDevice);
   const setActiveView = useAppStore((s) => s.setActiveView);
 
-  const device = devices.find((d) => d.id === selectedId) ?? devices[0] ?? null;
+  const device = devices.find((d) => d.serial === selectedSerial) ?? devices[0] ?? null;
 
   return (
     <header
@@ -59,7 +59,7 @@ export function DeviceTopBar() {
           {/* Model + status */}
           <div style={{ display: "flex", flexDirection: "column", gap: "0px", flex: "0 0 auto" }}>
             <span style={{ fontWeight: 700, fontSize: "13px", color: "var(--color-text-primary)", lineHeight: 1.2 }}>
-              {device.model || device.id}
+              {device.model || device.serial || device.id}
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
               <span
@@ -78,7 +78,7 @@ export function DeviceTopBar() {
               />
               <span style={{ fontSize: "11px", color: "var(--color-text-secondary)" }}>
                 {device.status}
-                {device.connectionType !== "Unknown" && ` · ${device.connectionType}`}
+                {device.connectionTypes.length > 0 && ` · ${device.connectionTypes.join(" + ")}`}
                 {device.androidVersion && ` · Android ${device.androidVersion}`}
               </span>
             </div>
@@ -95,7 +95,7 @@ export function DeviceTopBar() {
                 fontSize: "12px",
               }}
             >
-              {device.connectionType === "WiFi" ? (
+              {device.connectionTypes.includes("WiFi") ? (
                 <Wifi size={13} strokeWidth={1.8} />
               ) : (
                 <BatteryCharging size={13} strokeWidth={1.8} />
@@ -108,7 +108,7 @@ export function DeviceTopBar() {
           {devices.length > 1 && (
             <select
               title="Switch device"
-              value={selectedId ?? ""}
+              value={selectedSerial ?? ""}
               onChange={(e) => setSelectedDevice(e.target.value)}
               style={{
                 background: "var(--color-surface-card)",
@@ -121,8 +121,8 @@ export function DeviceTopBar() {
               }}
             >
               {devices.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.model || d.id}
+                <option key={d.serial} value={d.serial}>
+                  {d.model || d.serial || d.id}
                 </option>
               ))}
             </select>

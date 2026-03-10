@@ -7,7 +7,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 
 export function useFiles() {
-  const selectedDevice = useAppStore((s) => s.selectedDevice);
+  const selectedDevice = useAppStore((s) => s.selectedSerial);
   const currentPath = useAppStore((s) => s.currentPath);
   const setCurrentPath = useAppStore((s) => s.setCurrentPath);
   const files = useAppStore((s) => s.files);
@@ -19,6 +19,9 @@ export function useFiles() {
 
   const fetchFiles = useCallback(async (path: string) => {
     if (!selectedDevice) return;
+    
+    // Use store state directly to avoid dependency noise
+    const { setIsLoading } = useAppStore.getState();
     setIsLoading(true);
     try {
       const entries = await invoke<FileEntry[]>("list_files", { deviceId: selectedDevice, path });

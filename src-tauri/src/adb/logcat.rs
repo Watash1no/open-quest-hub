@@ -8,6 +8,9 @@ use crate::error::AppError;
 use crate::models::{LogLine, LogLevel};
 use super::find_adb;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 pub struct LogcatManager {
     pub processes: Arc<Mutex<HashMap<String, Child>>>,
 }
@@ -38,7 +41,7 @@ pub async fn start_logcat(
         let _ = child.kill().await;
     }
 
-    let adb = find_adb()?;
+    let adb = find_adb(&app)?;
     
     // Split custom_args by whitespace, but handle quoted strings if needed? 
     // For now, keep it simple: split by whitespace.
@@ -47,6 +50,11 @@ pub async fn start_logcat(
     let mut cmd = Command::new(adb);
     cmd.args(["-s", &device_id, "logcat"]);
     cmd.args(adb_args);
+
+    #[cfg(target_os = "windows")]
+    {
+        cmd.as_std_mut().creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
     
     let mut child = cmd
         .stdout(std::process::Stdio::piped())
@@ -129,4 +137,16 @@ fn parse_logcat_line(device_id: &str, raw: &str) -> LogLine {
         tag,
         message,
     }
+}
+
+/// Kills all background `adb logcat` processes.
+#[tauri::command]
+pub async fn stop_all_logcat(
+    state: tauri::State<'_, LogcatManager>,
+) -> Result<(), AppError> {
+    let mut processes = state.processes.lock().await;
+    for (_, mut child) in processes.drain() {
+        let _ = child.kill().await;
+    }
+    Ok(())
 }

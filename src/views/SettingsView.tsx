@@ -1,9 +1,27 @@
-import { Settings, FolderOpen, RefreshCw } from "lucide-react";
+import { Settings, FolderOpen, RefreshCw, Terminal, Activity } from "lucide-react";
 import { useSettings } from "../hooks/useSettings";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 export function SettingsView() {
   const { settings, updateSettings } = useSettings();
+
+  const [adbDiag, setAdbDiag] = useState<{ adbPath?: string; rawOutput: string; error?: string } | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+
+  const handleCheckAdb = async () => {
+    setIsChecking(true);
+    try {
+      const res = await invoke<any>("get_adb_status");
+      setAdbDiag(res);
+    } catch (err) {
+      console.error("Diagnostic failed:", err);
+      setAdbDiag({ rawOutput: "", error: String(err) });
+    } finally {
+      setIsChecking(false);
+    }
+  };
 
   const handlePickDir = async () => {
     try {
@@ -114,7 +132,6 @@ export function SettingsView() {
             </div>
           </div>
         </section>
-
         {/* Storage Section */}
         <section className="section-card" style={{ padding: "20px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
@@ -150,7 +167,58 @@ export function SettingsView() {
           </div>
         </section>
 
+        {/* Diagnostics Section */}
+        <section className="section-card" style={{ padding: "20px", border: "1px solid var(--color-surface-border)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <Activity size={16} color="var(--color-accent)" />
+              <h2 style={{ fontSize: "14px", fontWeight: 600 }}>Diagnostics</h2>
+            </div>
+            <button 
+              className="badge" 
+              disabled={isChecking}
+              onClick={handleCheckAdb}
+              style={{ background: "var(--color-surface)", border: "1px solid var(--color-accent)", cursor: "pointer", opacity: isChecking ? 0.5 : 1 }}
+            >
+              {isChecking ? "Checking..." : "Check ADB Status"}
+            </button>
+          </div>
+
+          {adbDiag && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px", background: "rgba(0,0,0,0.2)", padding: "12px", borderRadius: "6px" }}>
+              <div style={{ fontSize: "12px" }}>
+                <span style={{ color: "var(--color-text-secondary)" }}>ADB Path: </span>
+                <code style={{ color: "var(--color-success)" }}>{adbDiag.adbPath || "Not found"}</code>
+              </div>
+              {adbDiag.error && (
+                <div style={{ fontSize: "12px", color: "var(--color-danger)" }}>
+                  <strong>Error:</strong> {adbDiag.error}
+                </div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: "var(--color-text-secondary)" }}>
+                  <Terminal size={12} />
+                  <span>Raw Output (adb devices -l):</span>
+                </div>
+                <pre style={{ 
+                  margin: 0, 
+                  fontSize: "11px", 
+                  background: "#000", 
+                  padding: "8px", 
+                  borderRadius: "4px", 
+                  overflowX: "auto",
+                  color: "#aaa",
+                  maxHeight: "200px"
+                }}>
+                  {adbDiag.rawOutput || (adbDiag.error ? "Failed to run command" : "No devices found")}
+                </pre>
+              </div>
+            </div>
+          )}
+        </section>
+
       </div>
     </div>
   );
 }
+

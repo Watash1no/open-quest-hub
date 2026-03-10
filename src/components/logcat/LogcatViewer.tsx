@@ -12,6 +12,16 @@ const LEVEL_COLORS: Record<string, string> = {
   [LogLevel.Unknown]: "#64748b", // slate-500
 };
 
+const LEVEL_PRIORITY: Record<string, number> = {
+  [LogLevel.Verbose]: 0,
+  [LogLevel.Debug]: 1,
+  [LogLevel.Info]: 2,
+  [LogLevel.Warn]: 3,
+  [LogLevel.Error]: 4,
+  [LogLevel.Fatal]: 5,
+  [LogLevel.Unknown]: -1,
+};
+
 export function LogcatViewer() {
   const logLines = useAppStore((s) => s.logLines);
   const logPaused = useAppStore((s) => s.logPaused);
@@ -20,17 +30,6 @@ export function LogcatViewer() {
   
   const parentRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
-
-  // Level priority for "Min Level" filtering
-  const LEVEL_PRIORITY: Record<string, number> = {
-    [LogLevel.Verbose]: 0,
-    [LogLevel.Debug]: 1,
-    [LogLevel.Info]: 2,
-    [LogLevel.Warn]: 3,
-    [LogLevel.Error]: 4,
-    [LogLevel.Fatal]: 5,
-    [LogLevel.Unknown]: -1,
-  };
 
   // 1. Filter lines regardless of pause
   const filteredLines = useMemo(() => {

@@ -8,7 +8,7 @@ use super::run_adb_device;
 /// Returns a list of files/directories in the given path.
 /// Runs: adb -s <id> shell ls -la <path>
 #[tauri::command]
-pub async fn list_files(device_id: String, path: String) -> Result<Vec<FileEntry>, AppError> {
+pub async fn list_files(app: AppHandle, device_id: String, path: String) -> Result<Vec<FileEntry>, AppError> {
     // We use a trailing slash for directories to ensure ls behavior is consistent,
     // but we must be careful with root.
     let target_path = if path.ends_with('/') || path.is_empty() {
@@ -17,7 +17,7 @@ pub async fn list_files(device_id: String, path: String) -> Result<Vec<FileEntry
         format!("{}/", path)
     };
 
-    let raw = match run_adb_device(&device_id, &["shell", "ls", "-la", &target_path]).await {
+    let raw = match run_adb_device(&app, &device_id, &["shell", "ls", "-la", &target_path]).await {
         Ok(out) => out,
         Err(AppError::CommandFailed(err)) if err.contains("Permission denied") => {
             return Ok(Vec::new());
@@ -112,7 +112,7 @@ pub async fn pull_file(
 
     // adb pull doesn't give easy progress per line, 
     // but we can at least detect the finish.
-    let output = run_adb_device(&device_id, &["pull", &remote_path, &local_path]).await;
+    let output = run_adb_device(&app, &device_id, &["pull", &remote_path, &local_path]).await;
 
     match output {
         Ok(_) => {

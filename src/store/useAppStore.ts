@@ -7,8 +7,8 @@ import type { ActiveView, Device, FileEntry, LogLine } from "../types";
 interface AppState {
   // Device list (updated by useDevices hook polling adb)
   devices: Device[];
-  // Serial ID of the currently selected device (null = none)
-  selectedDevice: string | null;
+  // Hardware serial ID of the currently selected device (null = none)
+  selectedSerial: string | null;
   // Which main section is visible in the content area
   activeView: ActiveView;
 
@@ -18,6 +18,7 @@ interface AppState {
   logSearch: string;
   logcatArgs: string;
   minLogLevel: LogLevel | null;
+  isLogcatRunning: boolean;
 
   // File Explorer
   currentPath: string;
@@ -25,6 +26,12 @@ interface AppState {
   fileTransferProgress: {
     status: "none" | "starting" | "progress" | "done" | "error";
     percent: number;
+    message?: string;
+  };
+  installProgress: {
+    status: "none" | "starting" | "installing" | "done" | "error";
+    percent: number;
+    appName?: string;
     message?: string;
   };
 
@@ -57,11 +64,13 @@ interface AppActions {
   setLogcatArgs: (args: string) => void;
   clearLogs: () => void;
   setMinLogLevel: (level: LogLevel | null) => void;
+  setIsLogcatRunning: (running: boolean) => void;
 
   // File Explorer
   setCurrentPath: (path: string) => void;
   setFiles: (files: FileEntry[]) => void;
   setFileTransferProgress: (progress: AppState["fileTransferProgress"]) => void;
+  setInstallProgress: (progress: AppState["installProgress"]) => void;
 
   // Global
   setIsLoading: (loading: boolean) => void;
@@ -79,7 +88,7 @@ interface AppActions {
 export const useAppStore = create<AppState & AppActions>((set) => ({
   // Initial state
   devices: [],
-  selectedDevice: null,
+  selectedSerial: null,
   activeView: "devices",
 
   logLines: [],
@@ -87,10 +96,12 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   logSearch: "",
   logcatArgs: "-v threadtime",
   minLogLevel: null,
+  isLogcatRunning: false,
 
   currentPath: "/sdcard",
   files: [],
   fileTransferProgress: { status: "none", percent: 0 },
+  installProgress: { status: "none", percent: 0 },
 
   isLoading: false,
 
@@ -106,7 +117,7 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   // Actions
   setDevices: (devices) => set({ devices }),
 
-  setSelectedDevice: (selectedDevice) => set({ selectedDevice }),
+  setSelectedDevice: (selectedSerial) => set({ selectedSerial }),
 
   setActiveView: (activeView) => set({ activeView }),
 
@@ -125,12 +136,14 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   setLogcatArgs: (logcatArgs) => set({ logcatArgs }),
   clearLogs: () => set({ logLines: [] }),
   setMinLogLevel: (minLogLevel) => set({ minLogLevel }),
+  setIsLogcatRunning: (isLogcatRunning) => set({ isLogcatRunning }),
 
   setCurrentPath: (currentPath) => set({ currentPath }),
 
   setFiles: (files) => set({ files }),
 
   setFileTransferProgress: (fileTransferProgress) => set({ fileTransferProgress }),
+  setInstallProgress: (installProgress) => set({ installProgress }),
 
   setIsLoading: (isLoading) => set({ isLoading }),
 

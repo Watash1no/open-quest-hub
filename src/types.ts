@@ -6,10 +6,11 @@ export type ConnectionType = "USB" | "WiFi" | "Unknown";
 
 export interface Device {
   id: string;
+  serial: string;
   model: string;
   androidVersion: string;
   batteryLevel: number | null;
-  connectionType: ConnectionType;
+  connectionTypes: ConnectionType[];
   status: DeviceStatus;
 }
 
@@ -17,6 +18,8 @@ export interface Package {
   name: string;
   label: string | null;
   version: string | null;
+  installDate: string | null;
+  running: boolean;
 }
 
 export interface FileEntry {

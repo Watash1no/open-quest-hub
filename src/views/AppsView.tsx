@@ -6,7 +6,7 @@ import { useAppStore } from "../store/useAppStore";
 
 export function AppsView() {
   const { packages, isLoading, refresh, launchApp, uninstallApp } = useApps();
-  const selectedDevice = useAppStore((s) => s.selectedDevice);
+  const selectedDevice = useAppStore((s) => s.selectedSerial);
 
   return (
     <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "24px", height: "100%" }}>
@@ -17,7 +17,7 @@ export function AppsView() {
         <div style={{ flex: 1 }} />
         <button 
           className="icon-btn" 
-          onClick={refresh} 
+          onClick={() => refresh()} 
           disabled={isLoading || !selectedDevice}
           title="Refresh List"
           style={{ background: "var(--color-surface-card)", border: "1px solid var(--color-surface-border)", borderRadius: "8px", width: "36px", height: "36px" }}
