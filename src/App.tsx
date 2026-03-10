@@ -37,11 +37,10 @@ function App() {
     let unlistenDrop: (() => void) | null = null;
     let unlistenProgress: (() => void) | null = null;
 
-    // 1. Listen for global file drops (Tauri native)
-    (getCurrentWindow() as any).onDragDrop((event: any) => {
-      const { payload } = event;
-      if (payload.type === "drop") {
-        const apks = payload.paths.filter((p: string) => p.toLowerCase().endsWith(".apk"));
+    // 1. Listen for global file drops (Tauri v2)
+    let unlistenDropPromise = getCurrentWindow().onDragDropEvent((event) => {
+      if (event.payload.type === "drop") {
+        const apks = event.payload.paths.filter((p: string) => p.toLowerCase().endsWith(".apk"));
         if (apks.length > 0) {
           const apkPath = apks[0];
           const fileName = apkPath.split(/[\\/]/).pop() || "app.apk";
@@ -60,7 +59,10 @@ function App() {
             });
         }
       }
-    }).then((fn: () => void) => { unlistenDrop = fn; });
+    });
+
+    unlistenDropPromise.then((fn) => { unlistenDrop = fn; });
+
 
     // 2. Listen for install progress from Rust
     listen<{ deviceId: string; percent: number; status: string; message?: string }>(
