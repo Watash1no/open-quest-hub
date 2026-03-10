@@ -11,17 +11,20 @@ use super::find_adb;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-pub struct LogcatManager {
-    pub processes: Arc<Mutex<HashMap<String, Child>>>,
+pub struct ProcessManager {
+    pub logcat_processes: Arc<Mutex<HashMap<String, Child>>>,
+    pub scrcpy_processes: Arc<Mutex<HashMap<String, Child>>>,
 }
 
-impl LogcatManager {
+impl ProcessManager {
     pub fn new() -> Self {
         Self {
-            processes: Arc::new(Mutex::new(HashMap::new())),
+            logcat_processes: Arc::new(Mutex::new(HashMap::new())),
+            scrcpy_processes: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
+
 
 // ── P2.1: start_logcat / stop_logcat ─────────────────────────────────────────
 
@@ -32,12 +35,12 @@ pub async fn start_logcat(
     device_id: String,
     custom_args: String,
     app: AppHandle,
-    state: State<'_, LogcatManager>,
+    state: State<'_, ProcessManager>,
 ) -> Result<(), AppError> {
-    let mut processes = state.processes.lock().await;
+    let mut processes = state.logcat_processes.lock().await;
 
-    // ... (rest of logic)
     if let Some(mut child) = processes.remove(&device_id) {
+
         let _ = child.kill().await;
     }
 
@@ -80,6 +83,7 @@ pub async fn start_logcat(
     });
 
     processes.insert(device_id, child);
+
     Ok(())
 }
 
@@ -87,9 +91,10 @@ pub async fn start_logcat(
 #[tauri::command]
 pub async fn stop_logcat(
     device_id: String,
-    state: State<'_, LogcatManager>,
+    state: State<'_, ProcessManager>,
 ) -> Result<(), AppError> {
-    let mut processes = state.processes.lock().await;
+    let mut processes = state.logcat_processes.lock().await;
+
     if let Some(mut child) = processes.remove(&device_id) {
         let _ = child.kill().await;
     }
@@ -142,11 +147,12 @@ fn parse_logcat_line(device_id: &str, raw: &str) -> LogLine {
 /// Kills all background `adb logcat` processes.
 #[tauri::command]
 pub async fn stop_all_logcat(
-    state: tauri::State<'_, LogcatManager>,
+    state: tauri::State<'_, ProcessManager>,
 ) -> Result<(), AppError> {
-    let mut processes = state.processes.lock().await;
+    let mut processes = state.logcat_processes.lock().await;
     for (_, mut child) in processes.drain() {
         let _ = child.kill().await;
     }
     Ok(())
 }
+

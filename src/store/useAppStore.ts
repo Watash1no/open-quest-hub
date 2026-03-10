@@ -19,6 +19,8 @@ interface AppState {
   logcatArgs: string;
   minLogLevel: LogLevel | null;
   isLogcatRunning: boolean;
+  isCasting: boolean;
+
 
   // File Explorer
   currentPath: string;
@@ -65,6 +67,8 @@ interface AppActions {
   clearLogs: () => void;
   setMinLogLevel: (level: LogLevel | null) => void;
   setIsLogcatRunning: (running: boolean) => void;
+  setIsCasting: (casting: boolean) => void;
+
 
   // File Explorer
   setCurrentPath: (path: string) => void;
@@ -97,6 +101,8 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   logcatArgs: "-v threadtime",
   minLogLevel: null,
   isLogcatRunning: false,
+  isCasting: false,
+
 
   currentPath: "/sdcard",
   files: [],
@@ -137,6 +143,8 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   clearLogs: () => set({ logLines: [] }),
   setMinLogLevel: (minLogLevel) => set({ minLogLevel }),
   setIsLogcatRunning: (isLogcatRunning) => set({ isLogcatRunning }),
+  setIsCasting: (isCasting) => set({ isCasting }),
+
 
   setCurrentPath: (currentPath) => set({ currentPath }),
 

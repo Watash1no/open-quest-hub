@@ -22,12 +22,17 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
+import { Upload } from "lucide-react";
+import { useState } from "react";
+
 
 function App() {
   const activeView = useAppStore((s) => s.activeView);
   const selectedSerial = useAppStore((s) => s.selectedSerial);
   const devices = useAppStore((s) => s.devices);
   const setInstallProgress = useAppStore((s) => s.setInstallProgress);
+  const [isDragging, setIsDragging] = useState(false);
+
 
   useSettings();
   useDevices();
@@ -39,27 +44,40 @@ function App() {
 
     // 1. Listen for global file drops (Tauri v2)
     let unlistenDropPromise = getCurrentWindow().onDragDropEvent((event) => {
-      if (event.payload.type === "drop") {
-        const apks = event.payload.paths.filter((p: string) => p.toLowerCase().endsWith(".apk"));
-        if (apks.length > 0) {
-          const apkPath = apks[0];
-          const fileName = apkPath.split(/[\\/]/).pop() || "app.apk";
-          
-          const device = devices.find(d => d.serial === selectedSerial);
-          if (!device) {
-            toast.error("No device selected for installation");
-            return;
-          }
+      switch (event.payload.type) {
+        case "enter":
+        case "over":
+          setIsDragging(true);
+          break;
+        case "leave":
+          setIsDragging(false);
+          break;
 
-          setInstallProgress({ status: "starting", percent: 0, appName: fileName });
-          invoke("install_apk", { deviceId: device.id, apkPath })
-            .catch(err => {
-              console.error("Global install failed", err);
-              setInstallProgress({ status: "error", percent: -1, message: String(err) });
-            });
-        }
+        case "drop":
+          setIsDragging(false);
+          const apks = event.payload.paths.filter((p: string) => p.toLowerCase().endsWith(".apk"));
+          if (apks.length > 0) {
+            const apkPath = apks[0];
+            const fileName = apkPath.split(/[\\/]/).pop() || "app.apk";
+            
+            const device = devices.find(d => d.serial === selectedSerial);
+            if (!device) {
+              toast.error("No device selected for installation");
+              return;
+            }
+
+            toast.info(`Installing ${fileName}...`);
+            setInstallProgress({ status: "starting", percent: 0, appName: fileName });
+            invoke("install_apk", { deviceId: device.id, apkPath })
+              .catch(err => {
+                console.error("Global install failed", err);
+                setInstallProgress({ status: "error", percent: -1, message: String(err) });
+              });
+          }
+          break;
       }
     });
+
 
     unlistenDropPromise.then((fn) => { unlistenDrop = fn; });
 
@@ -138,7 +156,65 @@ function App() {
         }}
       />
       <SetupModal />
+
+      {/* ── Global Drag & Drop Overlay ── */}
+      {isDragging && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.7)",
+            backdropFilter: "blur(8px)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none", // Let events pass through to the listener
+          }}
+        >
+          <div
+            className="animate-pulse"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "24px",
+              padding: "48px",
+              borderRadius: "24px",
+              border: "2px dashed var(--color-accent)",
+              background: "rgba(var(--color-accent-rgb), 0.1)",
+            }}
+          >
+            <div
+              style={{
+                width: "80px",
+                height: "80px",
+                borderRadius: "20px",
+                background: "var(--color-accent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 0 40px rgba(124, 106, 247, 0.4)",
+              }}
+            >
+              <Upload size={40} color="white" strokeWidth={1.5} />
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <h2 style={{ fontSize: "24px", fontWeight: 800, color: "white", marginBottom: "8px" }}>
+                Drop APK to Install
+              </h2>
+              <p style={{ fontSize: "14px", color: "var(--color-text-secondary)" }}>
+                The build will be installed on the selected device
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </>
+
   );
 }
 

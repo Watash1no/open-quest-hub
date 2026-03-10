@@ -67,10 +67,9 @@ export function DevicesView() {
   const [adbWifi, setAdbWifi] = useState(false);
   const [boundary, setBoundary] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
+  const isCasting = useAppStore((s) => s.isCasting);
+  const setIsCasting = useAppStore((s) => s.setIsCasting);
 
-  // Drag-and-drop state
-  const [dragging, setDragging] = useState(false);
-  const dragCounter = useRef(0); // Better drag tracking
 
   const handleRefresh = async () => {
     try {
@@ -142,50 +141,10 @@ export function DevicesView() {
     }
   };
 
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounter.current++;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setDragging(true);
-    }
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounter.current--;
-    if (dragCounter.current === 0) {
-      setDragging(false);
-    }
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragging(false);
-    dragCounter.current = 0;
-    if (!selectedDevice) return;
-
-    const files = Array.from(e.dataTransfer.files).filter((f) => f.name.endsWith(".apk"));
-    if (files.length === 0) {
-      toast.error("Only .apk files are supported");
-      return;
-    }
-    
-    // In Tauri standard webview, we still can't get the absolute path for security.
-    toast.info("To install, please use the 'Add Build' button.", {
-       description: "Security policies for webviews prevent access to full file paths from the browser drop event."
-    });
-  };
-
   // ── Empty state ──────────────────────────────────────────────────────────
   if (devices.length === 0) {
     return (
-      <div 
-        style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}
-        onDragEnter={handleDragEnter}
-        onDragOver={(e) => e.preventDefault()}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
+      <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
         <SectionHeader count={0} onRefresh={handleRefresh} />
         <div
           style={{
@@ -219,54 +178,8 @@ export function DevicesView() {
   }
 
   return (
-    <div 
-      style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "24px", position: "relative" }}
-      onDragEnter={handleDragEnter}
-      onDragOver={(e) => e.preventDefault()}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
+    <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "24px", position: "relative" }}>
       <SectionHeader count={devices.length} onRefresh={handleRefresh} />
-
-      {/* Drag & Drop Visual Overlay */}
-      {dragging && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(var(--color-accent-rgb), 0.15)",
-            backdropFilter: "blur(4px)",
-            zIndex: 1000,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            border: "4px dashed var(--color-accent)",
-            margin: "12px",
-            borderRadius: "16px",
-            pointerEvents: "none",
-            animation: "pulse 2s infinite ease-in-out",
-          }}
-        >
-          <div style={{ 
-            background: "var(--color-surface)", 
-            padding: "32px 48px", 
-            borderRadius: "20px",
-            boxShadow: "0 20px 50px rgba(0,0,0,0.5)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "16px",
-            border: "1px solid var(--color-surface-border)"
-          }}>
-             <Upload size={48} color="var(--color-accent)" strokeWidth={1.5} />
-             <div style={{ fontSize: "20px", fontWeight: 700 }}>Drop APK to Install</div>
-             <div style={{ fontSize: "14px", color: "var(--color-text-secondary)" }}>Only .apk files are supported</div>
-          </div>
-        </div>
-      )}
 
       {/* ── Device grid ── */}
       <div
@@ -286,6 +199,8 @@ export function DevicesView() {
           />
         ))}
       </div>
+
+
 
       {selectedDevice && (
         <>
@@ -434,18 +349,29 @@ export function DevicesView() {
               {
                 id: "cast",
                 icon: <Cast size={15} strokeWidth={1.8} />,
-                label: "Cast Device",
-                desc: "Mirror display via scrcpy",
+                label: isCasting ? "Stop Casting" : "Cast Device",
+                desc: isCasting ? "Casting in progress..." : "Mirror display via scrcpy",
                 action: async () => {
                   try {
-                    await invoke("cast_device", { deviceId: selectedDevice.id });
-                    toast.success("Launching scrcpy...");
+                    if (isCasting) {
+                      await invoke("stop_casting", { deviceId: selectedDevice.id });
+                      setIsCasting(false);
+                      toast.success("Casting stopped");
+                    } else {
+                      await invoke("cast_device", { deviceId: selectedDevice.id });
+                      setIsCasting(true);
+                      toast.success("Launching scrcpy...");
+                    }
                   } catch (err) {
-                    toast.error("Failed to cast", { description: "Make sure scrcpy is installed on your path." });
+                    toast.error(isCasting ? "Failed to stop cast" : "Failed to cast", { 
+                      description: "Make sure scrcpy is installed on your path." 
+                    });
                   }
                 },
-                btnLabel: "Start"
+                status: isCasting ? "stop" : "start",
+                btnLabel: isCasting ? "Stop" : "Start"
               },
+
               {
                 id: "video",
                 icon: <Video size={15} strokeWidth={1.8} />,

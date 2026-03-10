@@ -1,7 +1,9 @@
-use tauri::AppHandle;
 use crate::adb::run_adb_device;
+use crate::adb::logcat::ProcessManager;
 use crate::error::AppError;
 use tokio::process::Command;
+use tauri::State;
+
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -146,15 +148,44 @@ pub async fn connect_device_ip(app: AppHandle, ip: String) -> Result<(), AppErro
     Ok(())
 }
 
-/// Launches scrcpy for the given device.
+/// Launches scrcpy for the given device and tracks the process.
 #[tauri::command]
-pub async fn cast_device(_app: AppHandle, device_id: String) -> Result<(), AppError> {
-    let _child = Command::new("scrcpy")
+pub async fn cast_device(
+    app: AppHandle, 
+    state: State<'_, ProcessManager>, 
+    device_id: String
+) -> Result<(), AppError> {
+    let mut processes = state.scrcpy_processes.lock().await;
+    
+    // Kill existing scrcpy for this device if any
+    if let Some(mut child) = processes.remove(&device_id) {
+        let _ = child.kill().await;
+    }
+
+    let adb_path = crate::adb::find_adb(&app)?;
+    
+    let child = Command::new("scrcpy")
         .arg("-s")
         .arg(&device_id)
         .arg("--power-off-on-close")
+        .env("ADB", adb_path) // Ensure scrcpy uses our adb
         .spawn()
         .map_err(|e| AppError::CommandFailed(format!("Failed to launch scrcpy. Please ensure it is installed and in your PATH. Error: {}", e)))?;
 
+    processes.insert(device_id, child);
     Ok(())
 }
+
+/// Stops scrcpy for the given device.
+#[tauri::command]
+pub async fn stop_casting(
+    state: State<'_, ProcessManager>,
+    device_id: String
+) -> Result<(), AppError> {
+    let mut processes = state.scrcpy_processes.lock().await;
+    if let Some(mut child) = processes.remove(&device_id) {
+        let _ = child.kill().await;
+    }
+    Ok(())
+}
+
