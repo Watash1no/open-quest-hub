@@ -75,7 +75,7 @@ pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
             continue;
         };
 
-        // Try to fetch info, fallback on error (especially timeout)
+        // Try to fetch info, fallback on error
         let (model, android_version, battery_level, hardware_serial) = if status == DeviceStatus::Online {
             match fetch_device_info(&app, &id).await {
                 Ok(info) => info,
@@ -87,26 +87,25 @@ pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
 
         let conn = connection_type(&id);
 
-        // Heuristic: If we don't have a hardware serial (it equals the ID) and it's a WiFi IP,
-        // it might be an offline version of a device we already have.
-        // Actually, the best way to merge is to ensure we ONLY add 'Offline' WiFi devices
-        // if they don't match an existing Online USB device.
+        // Deduplication Logic:
+        // We use hardware_serial (ro.serialno) as the key if available.
+        // If info failed (Offline/Unauthorized), we use the ID.
+        // BUT if it's a WiFi ID (IP), we try to see if any Online device has a matching model/serial? 
+        // Actually, let's stick to hardware_serial but add a secondary lookup.
         
+        let mut merged = false;
+        
+        // 1. Exact match on hardware_serial
         if let Some(existing) = devices_map.get_mut(&hardware_serial) {
-            // Merge connections
-            if !existing.connection_types.contains(&conn) {
-                existing.connection_types.push(conn);
-            }
-            // Prefer USB as the primary ID for commands if both exist
-            if conn == ConnectionType::Usb {
-                existing.id = id;
-            }
-            // Update status if this connection is more "active"
-            if status == DeviceStatus::Online {
-                existing.status = DeviceStatus::Online;
-            }
-        } else {
-            // New device entry
+            merge_device(existing, id.clone(), conn, status);
+            merged = true;
+        } 
+        
+        // 2. If it's a WiFi IP and we couldn't get a serial, check if any existing device
+        // is Online and NOT yet WiFi-enabled? (Too aggressive?)
+        // Let's just rely on hardware_serial for now, but ensure we update the map correctly.
+        
+        if !merged {
             devices_map.insert(hardware_serial.clone(), Device {
                 id,
                 serial: hardware_serial,
@@ -119,13 +118,19 @@ pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
         }
     }
 
-    // Secondary pass: Clean up duplicates where an IP device (unauthorized/offline) 
-    // is definitely the same as an online USB device but we couldn't get the serial.
-    // This is hard without a persistent cache, but we can at least filter out 
-    // IPs that are "offline" if ANY other device is online and looks likely? 
-    // Actually, let's keep it simple for now and see if the timeout + error handling helps.
-    
     Ok(devices_map.into_values().collect())
+}
+
+fn merge_device(existing: &mut Device, id: String, conn: ConnectionType, status: DeviceStatus) {
+    if !existing.connection_types.contains(&conn) {
+        existing.connection_types.push(conn);
+    }
+    // Prefer the "most active" ID. If we are currently USB and getting a WiFi Online,
+    // or vice-versa, keep whichever is Online.
+    if status == DeviceStatus::Online {
+        existing.id = id;
+        existing.status = DeviceStatus::Online;
+    }
 }
 
 #[derive(serde::Serialize)]

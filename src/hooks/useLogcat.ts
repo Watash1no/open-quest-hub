@@ -48,6 +48,14 @@ export function useLogcat() {
 
   // Auto-stop on unmount or device change
   useEffect(() => {
+    if (activeDeviceRef.current && activeDeviceRef.current !== selectedDevice) {
+      invoke("stop_logcat", { deviceId: activeDeviceRef.current }).catch(console.error);
+      setIsRunning(false);
+      activeDeviceRef.current = null;
+    }
+  }, [selectedDevice, setIsRunning]);
+
+  useEffect(() => {
     return () => {
       if (activeDeviceRef.current) {
         invoke("stop_logcat", { deviceId: activeDeviceRef.current }).catch(console.error);

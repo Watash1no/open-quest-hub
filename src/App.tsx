@@ -16,6 +16,7 @@ import { useAppStore } from "./store/useAppStore";
 import { useSettings } from "./hooks/useSettings";
 import { useDevices } from "./hooks/useDevices";
 import { SetupModal } from "./components/layout/SetupModal";
+import { InstallProgressOverlay } from "./components/layout/InstallProgressOverlay";
 
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -55,49 +56,112 @@ function App() {
 
         case "drop":
           setIsDragging(false);
-          const apks = event.payload.paths.filter((p: string) => p.toLowerCase().endsWith(".apk"));
-          if (apks.length > 0) {
-            const apkPath = apks[0];
-            const fileName = apkPath.split(/[\\/]/).pop() || "app.apk";
-            
+          const droppedFiles = event.payload.paths;
+          const apks = droppedFiles.filter((p: string) => p.toLowerCase().endsWith(".apk"));
+          const obbs = droppedFiles.filter((p: string) => p.toLowerCase().endsWith(".obb"));
+          
+          if (apks.length > 0 || obbs.length > 0) {
             const device = devices.find(d => d.serial === selectedSerial);
             if (!device) {
               toast.error("No device selected for installation");
               return;
             }
 
-            toast.info(`Installing ${fileName}...`);
-            setInstallProgress({ status: "starting", percent: 0, appName: fileName });
-            invoke("install_apk", { deviceId: device.id, apkPath })
-              .catch(err => {
-                console.error("Global install failed", err);
-                setInstallProgress({ status: "error", percent: -1, message: String(err) });
+            const fileName = apks.length > 0 
+              ? apks[0].split(/[\\/]/).pop() || "app.apk"
+              : obbs[0].split(/[\\/]/).pop() || "data.obb";
+
+            // Prepare progress files
+            const files = [
+              ...apks.map(p => ({ name: p.split(/[\\/]/).pop()!, type: "apk" as const, percent: 0, status: "pending" as const })),
+              ...obbs.map(p => ({ name: p.split(/[\\/]/).pop()!, type: "obb" as const, percent: 0, status: "pending" as const }))
+            ];
+
+            setInstallProgress({ 
+              status: "starting", 
+              percent: 0, 
+              appName: fileName,
+              files
+            });
+
+            invoke("install_with_obb", { 
+              deviceId: device.id, 
+              apkPath: apks.length > 0 ? apks[0] : null,
+              obbPaths: obbs
+            }).catch(err => {
+              console.error("Install failed", err);
+              setInstallProgress({ 
+                status: "error", 
+                percent: -1, 
+                message: String(err),
+                files: files.map(f => ({ ...f, status: "error" }))
               });
+            });
           }
           break;
       }
     });
 
-
     unlistenDropPromise.then((fn) => { unlistenDrop = fn; });
 
-
     // 2. Listen for install progress from Rust
-    listen<{ deviceId: string; percent: number; status: string; message?: string }>(
+    listen<{ 
+      deviceId: string; 
+      percent: number; 
+      status: string; 
+      message?: string;
+      filename?: string;
+      fileType?: "apk" | "obb";
+    }>(
       "file-transfer-progress",
       (event) => {
         const targetDevice = devices.find(d => d.id === event.payload.deviceId);
         if (targetDevice?.serial === selectedSerial) {
-          setInstallProgress({
-            status: event.payload.status as any,
-            percent: event.payload.percent,
-            message: event.payload.message
+          const { status, percent, message, filename, fileType } = event.payload;
+          
+          useAppStore.setState((state) => {
+            let nextFiles = [...state.installProgress.files];
+            
+            if (filename) {
+              const fileIdx = nextFiles.findIndex(f => f.name === filename);
+              if (fileIdx !== -1) {
+                nextFiles[fileIdx] = { 
+                  ...nextFiles[fileIdx], 
+                  percent, 
+                  status: status as any 
+                };
+              } else {
+                nextFiles.push({
+                  name: filename,
+                  type: fileType || "obb",
+                  percent,
+                  status: status as any
+                });
+              }
+            } else if (status === "done" || status === "error") {
+              // Final signal for the whole batch
+              nextFiles = nextFiles.map(f => ({
+                ...f,
+                status: f.status === "pending" || f.status === "installing" || f.status === "uploading" ? (status as any) : f.status,
+                percent: status === "done" ? 100 : f.percent
+              }));
+            }
+
+            return {
+              installProgress: {
+                ...state.installProgress,
+                status: status as any,
+                percent,
+                message,
+                files: nextFiles
+              }
+            };
           });
           
-          if (event.payload.status === "done") {
+          if (status === "done" && useAppStore.getState().installProgress.files.every(f => f.status === "done")) {
             toast.success("Installation complete!");
-          } else if (event.payload.status === "error") {
-            toast.error("Installation failed", { description: event.payload.message });
+          } else if (status === "error") {
+            toast.error("Error", { description: message });
           }
         }
       }
@@ -156,6 +220,7 @@ function App() {
         }}
       />
       <SetupModal />
+      <InstallProgressOverlay />
 
       {/* ── Global Drag & Drop Overlay ── */}
       {isDragging && (

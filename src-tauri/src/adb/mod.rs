@@ -117,3 +117,19 @@ pub async fn run_adb_device<R: Runtime>(app: &AppHandle<R>, device_id: &str, arg
     full_args.extend_from_slice(args);
     run_adb(app, &full_args).await
 }
+
+/// Run an adb command and return a handle to its stdout for streaming.
+pub fn run_adb_stream<R: Runtime>(app: &AppHandle<R>, args: &[&str]) -> Result<tokio::process::Child, AppError> {
+    let adb = find_adb(app)?;
+    let mut cmd = Command::new(&adb);
+    cmd.args(args);
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        cmd.as_std_mut().creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    cmd.spawn().map_err(|e| AppError::CommandFailed(e.to_string()))
+}

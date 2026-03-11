@@ -61,6 +61,11 @@
   100% { opacity: 0.6; }
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
 .animate-slide-up { animation: slideUp 0.4s ease-out forwards; }
 .animate-pulse { animation: pulse 1.5s infinite ease-in-out; }

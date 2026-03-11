@@ -58,6 +58,8 @@ pub async fn start_logcat(
     {
         cmd.as_std_mut().creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
+
+    cmd.kill_on_drop(true);
     
     let mut child = cmd
         .stdout(std::process::Stdio::piped())

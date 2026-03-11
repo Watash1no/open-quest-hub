@@ -35,6 +35,13 @@ interface AppState {
     percent: number;
     appName?: string;
     message?: string;
+    // Track multiple files for APK+OBB installations
+    files: Array<{
+      name: string;
+      type: "apk" | "obb";
+      percent: number;
+      status: "pending" | "uploading" | "installing" | "done" | "error";
+    }>;
   };
 
   // Global loading indicator (e.g. while awaiting invoke calls)
@@ -107,7 +114,7 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   currentPath: "/sdcard",
   files: [],
   fileTransferProgress: { status: "none", percent: 0 },
-  installProgress: { status: "none", percent: 0 },
+  installProgress: { status: "none", percent: 0, files: [] },
 
   isLoading: false,
 

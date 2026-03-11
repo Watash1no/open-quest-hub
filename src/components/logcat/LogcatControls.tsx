@@ -1,4 +1,4 @@
-import { Trash, Pause, Play, ArrowDown, Search, Terminal, Square } from "lucide-react";
+import { Trash, Pause, Play, ArrowDown, Search, Terminal, Square, Filter } from "lucide-react";
 import { useAppStore } from "../../store/useAppStore";
 import { LogLevel } from "../../types";
 import { toast } from "sonner";
@@ -64,6 +64,39 @@ export function LogcatControls() {
               opacity: isRunning ? 0.6 : 1
             }}
           />
+        </div>
+        
+        {/* Presets */}
+        <div style={{ position: "relative", width: "120px" }}>
+          <Filter size={14} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--color-text-secondary)" }} />
+          <select 
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === "unity") setLogcatArgs("-v time Unity:V *:S");
+              else if (val === "unreal") setLogcatArgs("-v time UE:V *:S");
+              else if (val === "system") setLogcatArgs("-v time");
+              else if (val === "vr") setLogcatArgs("-v time vr:V *:S");
+            }}
+            style={{
+              width: "100%",
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-surface-border)",
+              borderRadius: "6px",
+              padding: "6px 10px 6px 28px",
+              fontSize: "12px",
+              color: "var(--color-text-primary)",
+              outline: "none",
+              appearance: "none",
+              cursor: isRunning ? "not-allowed" : "pointer"
+            }}
+            disabled={isRunning}
+          >
+            <option value="">Presets...</option>
+            <option value="system">Standard</option>
+            <option value="unity">Unity</option>
+            <option value="unreal">Unreal</option>
+            <option value="vr">VR Focus</option>
+          </select>
         </div>
       </div>
 

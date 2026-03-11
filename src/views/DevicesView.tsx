@@ -13,6 +13,10 @@ import {
   Trash2,
   Square,
   Play,
+  Wifi,
+  LayoutGrid,
+  RefreshCcw,
+  X,
 } from "lucide-react";
 import { useAppStore } from "../store/useAppStore";
 import { DeviceCard } from "../components/devices/DeviceCard";
@@ -64,11 +68,11 @@ export function DevicesView() {
   const selectedDevice: Device | null = devices.find((d) => d.serial === selectedSerial) ?? devices[0] ?? null;
 
   // Device Actions toggles
-  const [adbWifi, setAdbWifi] = useState(false);
   const [boundary, setBoundary] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const isCasting = useAppStore((s) => s.isCasting);
   const setIsCasting = useAppStore((s) => s.setIsCasting);
+  const [remoteMedia, setRemoteMedia] = useState<string[]>([]);
 
 
   const handleRefresh = async () => {
@@ -95,32 +99,15 @@ export function DevicesView() {
     }
   };
 
-  const handleEnableWifi = async () => {
-    if (!selectedDevice) return;
-    try {
-      toast.info("Discovering device IP...");
-      const ip = await invoke<string>("get_device_ip", { deviceId: selectedDevice.id });
-      
-      toast.info(`IP found: ${ip}. Switching to wireless mode...`);
-      await invoke("enable_wifi_adb", { deviceId: selectedDevice.id });
-      
-      // Wait a moment for ADB to restart on the device
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      await invoke("connect_device_ip", { ip });
-      setAdbWifi(true);
-      toast.success(`ADB connected wirelessly to ${ip}. You can now unplug the cable.`);
-      handleRefresh(); // Refresh device list to show the new connection
-    } catch (err) {
-      toast.error("Failed to enable Wi-Fi ADB", { description: String(err) });
-    }
-  };
 
   const handleScreenshot = async () => {
     if (!selectedDevice) return;
     try {
       const path = await invoke<string>("take_screenshot", { deviceId: selectedDevice.id });
       toast.success("Screenshot saved", { description: path });
+      // Refresh gallery
+      const list = await invoke<string[]>("list_remote_media", { deviceId: selectedDevice.id });
+      setRemoteMedia(list);
     } catch (err) {
       toast.error("Screenshot failed");
     }
@@ -132,14 +119,30 @@ export function DevicesView() {
     // Update local state IMMEDIATELY for snappy feedback
     setIsRecording(starting);
     try {
-      const res = await invoke<string>("record_video", { deviceId: selectedDevice.id, start: starting });
-      toast.success(starting ? "Recording started" : "Recording stopped", { description: res });
+      await invoke<string>("record_video", { deviceId: selectedDevice.id, start: starting });
+      toast.success(starting ? "Recording started" : "Recording stopped");
+      
+      if (!starting) {
+        // Refresh gallery after stopping record
+        const list = await invoke<string[]>("list_remote_media", { deviceId: selectedDevice.id });
+        setRemoteMedia(list);
+      }
     } catch (err) {
       // Revert if it failed
       setIsRecording(!starting);
       toast.error("Recording action failed");
     }
   };
+
+  useEffect(() => {
+    if (selectedDevice) {
+      invoke<string[]>("list_remote_media", { deviceId: selectedDevice.id })
+        .then(setRemoteMedia)
+        .catch(() => setRemoteMedia([]));
+    } else {
+      setRemoteMedia([]);
+    }
+  }, [selectedDevice?.serial]);
 
   // ── Empty state ──────────────────────────────────────────────────────────
   if (devices.length === 0) {
@@ -242,16 +245,49 @@ export function DevicesView() {
                    try {
                      const { open } = await import("@tauri-apps/plugin-dialog");
                      const selected = await open({
-                       filters: [{ name: "Android Package", extensions: ["apk"] }]
+                       multiple: true,
+                       filters: [{ name: "Android Files", extensions: ["apk", "obb"] }]
                      });
-                     if (selected && typeof selected === 'string') {
-                       toast.info(`Installing ${selected.split('\\').pop()?.split('/').pop()}...`);
-                       await invoke("install_apk", { deviceId: selectedDevice.id, apkPath: selected });
-                       toast.success("Installed successfully");
+                     
+                     if (selected && Array.isArray(selected) && selected.length > 0) {
+                       const apks = selected.filter(p => p.toLowerCase().endsWith(".apk"));
+                       const obbs = selected.filter(p => p.toLowerCase().endsWith(".obb"));
+                       
+                       const fileName = apks.length > 0 ? apks[0].split(/[\\/]/).pop()! : obbs[0].split(/[\\/]/).pop()!;
+                       
+                       // Set initial progress
+                       const files = [
+                         ...apks.map(p => ({ name: p.split(/[\\/]/).pop()!, type: "apk" as const, percent: 0, status: "pending" as const })),
+                         ...obbs.map(p => ({ name: p.split(/[\\/]/).pop()!, type: "obb" as const, percent: 0, status: "pending" as const }))
+                       ];
+
+                       useAppStore.getState().setInstallProgress({ 
+                         status: "starting", 
+                         percent: 0, 
+                         appName: fileName,
+                         files
+                       });
+
+                       await invoke("install_with_obb", { 
+                         deviceId: selectedDevice.id, 
+                         apkPath: apks.length > 0 ? apks[0] : null,
+                         obbPaths: obbs
+                       });
                        refreshApps();
+                       // Finalize progress after success
+                       useAppStore.getState().setInstallProgress({ 
+                         ...useAppStore.getState().installProgress,
+                         status: "done" 
+                       });
                      }
-                   } catch (e) {
-                     toast.error("Install failed", { description: String(e) });
+                   } catch (e: any) {
+                     const msg = e?.message || String(e);
+                     toast.error("Install failed", { description: msg });
+                     useAppStore.getState().setInstallProgress({ 
+                       ...useAppStore.getState().installProgress,
+                       status: "error",
+                       message: msg
+                     });
                    }
                 }}
               >
@@ -389,6 +425,24 @@ export function DevicesView() {
                 action: handleScreenshot,
                 btnLabel: "Make"
               },
+              {
+                id: "wifi",
+                icon: <Wifi size={15} strokeWidth={1.8} />,
+                label: "Switch to Wireless",
+                desc: "Enable ADB over Wi-Fi (unplug later)",
+                action: async () => {
+                  if (!selectedDevice) return;
+                  toast.promise(invoke("setup_wireless_adb", { deviceId: selectedDevice.id }), {
+                    loading: "Configuring wireless ADB (stay plugged in)...",
+                    success: (ip) => {
+                      handleRefresh();
+                      return `Wireless ADB enabled on ${ip}! You can unplug now.`;
+                    },
+                    error: "Failed to setup wireless mode. Is the device on Wi-Fi?"
+                  });
+                },
+                btnLabel: "Switch"
+              },
             ].map(({ id, icon, label, desc, action, status, btnLabel }) => (
               <div
                 key={id}
@@ -427,35 +481,6 @@ export function DevicesView() {
               </div>
             ))}
 
-            {/* Toggles */}
-            <div
-              className="table-row"
-              style={{ gridTemplateColumns: "28px 1fr auto", height: "52px", gap: "10px" }}
-            >
-              <span style={{ color: "var(--color-text-secondary)", fontSize: "15px" }}>📶</span>
-              <div>
-                <div style={{ fontWeight: 500, fontSize: "13px" }}>ADB over Wi-Fi</div>
-                <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "1px" }}>
-                  {adbWifi ? "Enabled — connect wirelessly on port 5555" : "Disabled"}
-                </div>
-              </div>
-              <Toggle
-                checked={adbWifi}
-                onChange={async (v) => {
-                  if (v) await handleEnableWifi();
-                  else {
-                    try {
-                      await invoke("disable_wifi_adb", { deviceId: selectedDevice.id });
-                      setAdbWifi(false);
-                      toast.success("WiFi ADB disabled");
-                      handleRefresh();
-                    } catch (err) {
-                      toast.error("Failed to disable WiFi ADB");
-                    }
-                  }
-                }}
-              />
-            </div>
 
             <div
               className="table-row"
@@ -469,6 +494,108 @@ export function DevicesView() {
                 </div>
               </div>
               <Toggle checked={boundary} onChange={handleToggleBoundary} />
+            </div>
+          </div>
+
+          {/* ── Section: Gallery ── */}
+          <div className="section-card" style={{ display: "flex", flexDirection: "column" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                padding: "12px 16px",
+                borderBottom: "1px solid var(--color-surface-border)",
+                gap: "10px",
+                justifyContent: "space-between"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <LayoutGrid size={15} color="var(--color-accent)" strokeWidth={1.8} />
+                <span style={{ fontWeight: 700, fontSize: "13px" }}>Media Gallery</span>
+              </div>
+              <button 
+                onClick={async () => {
+                   if (!selectedDevice) return;
+                   const list = await invoke<string[]>("list_remote_media", { deviceId: selectedDevice.id });
+                   setRemoteMedia(list);
+                   toast.success("Gallery refreshed");
+                }}
+                className="icon-btn"
+                style={{ width: "24px", height: "24px" }}
+              >
+                <RefreshCcw size={12} />
+              </button>
+            </div>
+
+            <div style={{ padding: "12px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", gap: "10px" }}>
+              {remoteMedia.length === 0 ? (
+                <div style={{ gridColumn: "1/-1", padding: "20px", textAlign: "center", color: "var(--color-text-disabled)", fontSize: "11px" }}>
+                  No screenshots or videos found on device root.
+                </div>
+              ) : (
+                remoteMedia.map(file => (
+                  <div 
+                    key={file} 
+                    onClick={async () => {
+                       if (!selectedDevice) return;
+                       toast.promise(invoke("open_remote_media", { deviceId: selectedDevice.id, filename: file }), {
+                         loading: "Opening media...",
+                         success: "Media opened",
+                         error: "Failed to open media"
+                       });
+                    }}
+                    style={{ 
+                      aspectRatio: "1/1", 
+                      background: "rgba(255,255,255,0.03)", 
+                      borderRadius: "6px", 
+                      border: "1px solid var(--color-surface-border)",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      position: "relative",
+                      overflow: "hidden",
+                      cursor: "pointer",
+                      transition: "transform 0.15s"
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.05)"}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1.0)"}
+                  >
+                    {file.endsWith(".png") ? <Camera size={24} style={{ opacity: 0.3 }} /> : <Video size={24} style={{ opacity: 0.3 }} />}
+                    <div style={{ fontSize: "9px", marginTop: "4px", maxWidth: "90%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "0 4px" }}>
+                      {file.replace("screenshot_", "").replace("video_", "")}
+                    </div>
+                    
+                    <button 
+                      onClick={async (e) => {
+                         e.stopPropagation();
+                         if (!selectedDevice) return;
+                         await invoke("delete_remote_media", { deviceId: selectedDevice.id, filename: file });
+                         setRemoteMedia(prev => prev.filter(f => f !== file));
+                         toast.success("Deleted from device");
+                      }}
+                      style={{
+                        position: "absolute",
+                        top: "4px",
+                        right: "4px",
+                        background: "var(--color-error)",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        width: "18px",
+                        height: "18px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        opacity: 0.8
+                      }}
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </>

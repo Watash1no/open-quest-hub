@@ -11,7 +11,7 @@ use std::os::windows::process::CommandExt;
 /// Toggles the Quest boundary (guardian) system.
 /// Runs: adb shell setprop debug.oculus.guardian_pause 1 (to disable) or 0 (to enable)
 #[tauri::command]
-pub async fn toggle_boundary(app: AppHandle, device_id: String, enabled: bool) -> Result<(), AppError> {
+pub async fn toggle_boundary(app: tauri::AppHandle, device_id: String, enabled: bool) -> Result<(), AppError> {
     let val = if enabled { "0" } else { "1" };
     run_adb_device(&app, &device_id, &["shell", "setprop", "debug.oculus.guardian_pause", val]).await?;
     Ok(())
@@ -20,7 +20,7 @@ pub async fn toggle_boundary(app: AppHandle, device_id: String, enabled: bool) -
 /// Enables ADB over Wi-Fi on port 5555.
 /// Runs: adb tcpip 5555
 #[tauri::command]
-pub async fn enable_wifi_adb(app: AppHandle, device_id: String) -> Result<(), AppError> {
+pub async fn enable_wifi_adb(app: tauri::AppHandle, device_id: String) -> Result<(), AppError> {
     run_adb_device(&app, &device_id, &["tcpip", "5555"]).await?;
     Ok(())
 }
@@ -28,14 +28,14 @@ pub async fn enable_wifi_adb(app: AppHandle, device_id: String) -> Result<(), Ap
 /// Disables ADB over Wi-Fi (switches to USB mode).
 /// Runs: adb usb
 #[tauri::command]
-pub async fn disable_wifi_adb(app: AppHandle, device_id: String) -> Result<(), AppError> {
+pub async fn disable_wifi_adb(app: tauri::AppHandle, device_id: String) -> Result<(), AppError> {
     run_adb_device(&app, &device_id, &["usb"]).await?;
     Ok(())
 }
 
 /// Takes a screenshot and returns the local path where it's saved.
 #[tauri::command]
-pub async fn take_screenshot(app: AppHandle, device_id: String) -> Result<String, AppError> {
+pub async fn take_screenshot(app: tauri::AppHandle, device_id: String) -> Result<String, AppError> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -62,7 +62,7 @@ pub async fn take_screenshot(app: AppHandle, device_id: String) -> Result<String
 
 /// Starts/stops screen recording.
 #[tauri::command]
-pub async fn record_video(app: AppHandle, device_id: String, start: bool) -> Result<String, AppError> {
+pub async fn record_video(app: tauri::AppHandle, device_id: String, start: bool) -> Result<String, AppError> {
     if start {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -93,7 +93,7 @@ pub async fn record_video(app: AppHandle, device_id: String, start: bool) -> Res
 
 /// Gets the IP address of the device.
 #[tauri::command]
-pub async fn get_device_ip(app: AppHandle, device_id: String) -> Result<String, AppError> {
+pub async fn get_device_ip(app: tauri::AppHandle, device_id: String) -> Result<String, AppError> {
     let output = run_adb_device(&app, &device_id, &["shell", "ip", "route"]).await?;
     // Typical output: "192.168.1.0/24 dev wlan0 proto kernel scope link src 192.168.1.50"
     for line in output.lines() {
@@ -126,7 +126,7 @@ pub async fn get_device_ip(app: AppHandle, device_id: String) -> Result<String, 
 
 /// Connects to a device via IP.
 #[tauri::command]
-pub async fn connect_device_ip(app: AppHandle, ip: String) -> Result<(), AppError> {
+pub async fn connect_device_ip(app: tauri::AppHandle, ip: String) -> Result<(), AppError> {
     let adb_path = crate::adb::find_adb(&app)?;
     let mut cmd = Command::new(adb_path);
     cmd.arg("connect")
@@ -148,10 +148,28 @@ pub async fn connect_device_ip(app: AppHandle, ip: String) -> Result<(), AppErro
     Ok(())
 }
 
+/// A composite command that sets up wireless ADB in one go.
+#[tauri::command]
+pub async fn setup_wireless_adb(app: tauri::AppHandle, device_id: String) -> Result<String, AppError> {
+    // 1. Get IP
+    let ip = get_device_ip(app.clone(), device_id.clone()).await?;
+    
+    // 2. Open port 5555
+    let _ = enable_wifi_adb(app.clone(), device_id).await?;
+    
+    // 3. Small delay for the device to apply changes
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    
+    // 4. Connect
+    connect_device_ip(app, ip.clone()).await?;
+    
+    Ok(ip)
+}
+
 /// Launches scrcpy for the given device and tracks the process.
 #[tauri::command]
 pub async fn cast_device(
-    app: AppHandle, 
+    app: tauri::AppHandle, 
     state: State<'_, ProcessManager>, 
     device_id: String
 ) -> Result<(), AppError> {
@@ -169,6 +187,7 @@ pub async fn cast_device(
         .arg(&device_id)
         .arg("--power-off-on-close")
         .env("ADB", adb_path) // Ensure scrcpy uses our adb
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| AppError::CommandFailed(format!("Failed to launch scrcpy. Please ensure it is installed and in your PATH. Error: {}", e)))?;
 
@@ -186,6 +205,52 @@ pub async fn stop_casting(
     if let Some(mut child) = processes.remove(&device_id) {
         let _ = child.kill().await;
     }
+    Ok(())
+}
+
+/// Lists media files (screenshots/videos) created by this app on the device.
+#[tauri::command]
+pub async fn list_remote_media(app: tauri::AppHandle, device_id: String) -> Result<Vec<String>, AppError> {
+    let raw = match run_adb_device(&app, &device_id, &["shell", "ls", "-1", "/sdcard/"]).await {
+        Ok(out) => out,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut media = Vec::new();
+    for line in raw.lines() {
+        let name = line.trim();
+        if name.starts_with("screenshot_") || name.starts_with("video_") {
+            media.push(name.to_string());
+        }
+    }
+    Ok(media)
+}
+
+/// Deletes a media file from the device.
+#[tauri::command]
+pub async fn delete_remote_media(app: tauri::AppHandle, device_id: String, filename: String) -> Result<(), AppError> {
+    run_adb_device(&app, &device_id, &["shell", "rm", &format!("/sdcard/{}", filename)]).await?;
+    Ok(())
+}
+
+/// Pulls a remote file to a temp location and opens it.
+#[tauri::command]
+pub async fn open_remote_media(app: tauri::AppHandle, device_id: String, filename: String) -> Result<(), AppError> {
+    use tauri_plugin_opener::OpenerExt;
+    
+    let adb = crate::adb::find_adb(&app)?;
+    let temp_dir = std::env::temp_dir();
+    let local_path = temp_dir.join(&filename);
+    let local_path_str = local_path.to_string_lossy().to_string();
+
+    // Pull file
+    let _ = std::process::Command::new(adb)
+        .args(["-s", &device_id, "pull", &format!("/sdcard/{}", filename), &local_path_str])
+        .status();
+
+    // Open file
+    app.opener().open_path(local_path_str, None::<String>)
+        .map_err(|e| AppError::CommandFailed(format!("Failed to open media: {}", e)))?;
+
     Ok(())
 }
 
