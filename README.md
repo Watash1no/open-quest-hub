@@ -12,7 +12,7 @@
 - **📦 App Explorer:** Browse, uninstall, and launch installed applications. Sideload APKs with a simple drag-and-drop.
 - **📁 File Explorer:** Full access to device storage (`/sdcard`). Download files to your PC with real-time transfer progress.
 - **📟 Powerful Logcat:** High-performance log streaming with custom argument support (e.g., `-s unity`), filtering, and pausing.
-- **⚙️ Deep Configuration:** Persistent settings for ADB paths, polling intervals, and log buffer limits.
+- **⚙️ Deep Configuration:** Bundled ADB for plug-and-play ease, with persistent settings for custom ADB paths, polling intervals, and log buffer limits.
 - **🎨 Premium UI:** Frameless design with a custom titlebar, skeleton loaders, and smooth view transitions.
 
 ---
@@ -30,7 +30,6 @@
 
 ### Prerequisites
 
-- **ADB (Android Debug Bridge):** Ensure ADB is installed and added to your system PATH.
 - **Webview2 (Windows only):** Required for the frontend rendering.
 
 ### Installation
