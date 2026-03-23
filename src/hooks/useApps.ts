@@ -30,7 +30,7 @@ export function useApps() {
         return dateB - dateA;
       });
 
-      setPackages(sorted.slice(0, 5));
+      setPackages(sorted);
     } catch (err) {
       if (!isPolling) {
         console.error("Failed to list packages:", err);

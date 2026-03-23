@@ -16,7 +16,9 @@ pub struct Device {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ConnectionType {
+    #[serde(rename = "USB")]
     Usb,
+    #[serde(rename = "WiFi")]
     WiFi,
 }
 

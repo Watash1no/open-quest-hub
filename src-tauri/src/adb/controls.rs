@@ -236,16 +236,22 @@ pub async fn delete_remote_media(app: tauri::AppHandle, device_id: String, filen
 #[tauri::command]
 pub async fn open_remote_media(app: tauri::AppHandle, device_id: String, filename: String) -> Result<(), AppError> {
     use tauri_plugin_opener::OpenerExt;
-    
+
     let adb = crate::adb::find_adb(&app)?;
     let temp_dir = std::env::temp_dir();
     let local_path = temp_dir.join(&filename);
     let local_path_str = local_path.to_string_lossy().to_string();
 
-    // Pull file
-    let _ = std::process::Command::new(adb)
-        .args(["-s", &device_id, "pull", &format!("/sdcard/{}", filename), &local_path_str])
-        .status();
+    // Pull file (async — does not block the Tokio thread pool)
+    let mut cmd = Command::new(adb);
+    cmd.args(["-s", &device_id, "pull", &format!("/sdcard/{}", filename), &local_path_str]);
+
+    #[cfg(windows)]
+    {
+        cmd.as_std_mut().creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let _ = cmd.output().await;
 
     // Open file
     app.opener().open_path(local_path_str, None::<String>)

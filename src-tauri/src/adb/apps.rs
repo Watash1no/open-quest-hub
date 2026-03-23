@@ -1,7 +1,7 @@
 
 use crate::error::AppError;
 use crate::models::Package;
-use super::run_adb_device;
+use super::{run_adb_device, run_adb_device_no_timeout};
 
 // ── P1.1: list_packages ───────────────────────────────────────────────────────
 
@@ -29,29 +29,21 @@ pub async fn list_packages(app: tauri::AppHandle, device_id: String) -> Result<V
         })
         .collect();
 
-    // Fetch version and running status for each package
+    // Fetch version, install date and running status for each package.
+    // Combined into one dumpsys call to halve ADB round trips.
     for pkg in &mut packages {
-        // If we get a timeout error, the device is likely gone/hanging. 
-        // Stop the loop to avoid waiting 5s for every remaining package.
-        let version_res = get_package_version(&app, &device_id, &pkg.name).await;
-        if let Err(AppError::CommandFailed(ref msg)) = version_res {
-             if msg.contains("timed out") { break; }
+        let info_res = get_package_info(&app, &device_id, &pkg.name).await;
+        if let Err(AppError::CommandFailed(ref msg)) = info_res {
+            if msg.contains("timed out") { break; }
         }
-        if let Ok(version) = version_res {
-            pkg.version = Some(version);
+        if let Ok((version, install_date)) = info_res {
+            pkg.version = version;
+            pkg.install_date = install_date;
         }
 
-        let date_res = get_package_install_time(&app, &device_id, &pkg.name).await;
-        if let Err(AppError::CommandFailed(ref msg)) = date_res {
-             if msg.contains("timed out") { break; }
-        }
-        if let Ok(date) = date_res {
-            pkg.install_date = Some(date);
-        }
-        
         let pid_res = run_adb_device(&app, &device_id, &["shell", "pidof", &pkg.name]).await;
         if let Err(AppError::CommandFailed(ref msg)) = pid_res {
-             if msg.contains("timed out") { break; }
+            if msg.contains("timed out") { break; }
         }
         pkg.running = match pid_res {
             Ok(p) => !p.trim().is_empty(),
@@ -64,8 +56,9 @@ pub async fn list_packages(app: tauri::AppHandle, device_id: String) -> Result<V
     Ok(packages)
 }
 
-/// Gets versionName from `dumpsys package <pkg>`.
-async fn get_package_version(app: &tauri::AppHandle, device_id: &str, package: &str) -> Result<String, AppError> {
+/// Gets versionName AND firstInstallTime from a single `dumpsys package <pkg>` call.
+/// Returns (version, install_date) — both Option<String>.
+async fn get_package_info(app: &tauri::AppHandle, device_id: &str, package: &str) -> Result<(Option<String>, Option<String>), AppError> {
     let output = run_adb_device(
         app,
         device_id,
@@ -73,35 +66,27 @@ async fn get_package_version(app: &tauri::AppHandle, device_id: &str, package: &
     )
     .await?;
 
-    // Find "versionName=<value>" line
+    let mut version: Option<String> = None;
+    let mut install_date: Option<String> = None;
+
     for line in output.lines() {
         let trimmed = line.trim();
-        if let Some(ver) = trimmed.strip_prefix("versionName=") {
-            return Ok(ver.trim().to_string());
+        if version.is_none() {
+            if let Some(ver) = trimmed.strip_prefix("versionName=") {
+                version = Some(ver.trim().to_string());
+            }
+        }
+        if install_date.is_none() {
+            if let Some(time) = trimmed.strip_prefix("firstInstallTime=") {
+                install_date = Some(time.trim().to_string());
+            }
+        }
+        if version.is_some() && install_date.is_some() {
+            break; // Got both, no need to keep scanning
         }
     }
 
-    Err(AppError::CommandFailed("versionName not found".into()))
-}
-
-/// Gets firstInstallTime from `dumpsys package <pkg>`.
-async fn get_package_install_time(app: &tauri::AppHandle, device_id: &str, package: &str) -> Result<String, AppError> {
-    let output = run_adb_device(
-        app,
-        device_id,
-        &["shell", "dumpsys", "package", package],
-    )
-    .await?;
-
-    // Find "firstInstallTime=<value>" line
-    for line in output.lines() {
-        let trimmed = line.trim();
-        if let Some(time) = trimmed.strip_prefix("firstInstallTime=") {
-            return Ok(time.trim().to_string());
-        }
-    }
-
-    Err(AppError::CommandFailed("firstInstallTime not found".into()))
+    Ok((version, install_date))
 }
 
 // ── P1.2: uninstall_app + launch_app ─────────────────────────────────────────
@@ -181,7 +166,8 @@ pub async fn install_with_obb(
             "fileType": "apk"
         }));
 
-        let output = run_adb_device(&app, &device_id, &["install", "-r", path]).await?;
+        // Use no-timeout install for large APKs
+        let output = run_adb_device_no_timeout(&app, &device_id, &["install", "-r", path]).await?;
         if output.contains("Failure") || output.contains("FAILED") {
              let msg = output.trim().to_string();
              let _ = app.emit("file-transfer-progress", serde_json::json!({

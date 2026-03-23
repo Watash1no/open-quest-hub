@@ -274,11 +274,17 @@ export function DevicesView() {
                          obbPaths: obbs
                        });
                        refreshApps();
-                       // Finalize progress after success
+                       // Bug 4 fix: reset files so the overlay closes properly
                        useAppStore.getState().setInstallProgress({ 
-                         ...useAppStore.getState().installProgress,
-                         status: "done" 
+                         status: "done",
+                         percent: 100,
+                         appName: fileName,
+                         files: useAppStore.getState().installProgress.files.map(f => ({ ...f, percent: 100, status: "done" as const }))
                        });
+                       // Auto-hide overlay after 2 seconds
+                       setTimeout(() => {
+                         useAppStore.getState().setInstallProgress({ status: "none", percent: 0, files: [] });
+                       }, 2000);
                      }
                    } catch (e: any) {
                      const msg = e?.message || String(e);
@@ -324,7 +330,7 @@ export function DevicesView() {
               </div>
             )}
             
-            {packages.map((app: Package) => (
+            {packages.slice(0, 5).map((app: Package) => (
               <AppRow 
                 key={app.name} 
                 app={app} 

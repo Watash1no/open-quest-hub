@@ -18,7 +18,7 @@ import { useDevices } from "./hooks/useDevices";
 import { SetupModal } from "./components/layout/SetupModal";
 import { InstallProgressOverlay } from "./components/layout/InstallProgressOverlay";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -34,6 +34,11 @@ function App() {
   const setInstallProgress = useAppStore((s) => s.setInstallProgress);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Bug 5 fix: refs keep the listener's closure always fresh without re-registering
+  const devicesRef = useRef(devices);
+  const selectedSerialRef = useRef(selectedSerial);
+  useEffect(() => { devicesRef.current = devices; }, [devices]);
+  useEffect(() => { selectedSerialRef.current = selectedSerial; }, [selectedSerial]);
 
   useSettings();
   useDevices();
@@ -61,7 +66,8 @@ function App() {
           const obbs = droppedFiles.filter((p: string) => p.toLowerCase().endsWith(".obb"));
           
           if (apks.length > 0 || obbs.length > 0) {
-            const device = devices.find(d => d.serial === selectedSerial);
+            // Bug 5 fix: read from refs to avoid stale closure
+            const device = devicesRef.current.find(d => d.serial === selectedSerialRef.current);
             if (!device) {
               toast.error("No device selected for installation");
               return;
@@ -171,7 +177,10 @@ function App() {
       if (unlistenDrop) unlistenDrop();
       if (unlistenProgress) unlistenProgress();
     };
-  }, [selectedSerial, devices, setInstallProgress]);
+    // Bug 5 fix: empty deps — register listeners only once.
+    // Fresh device/serial data is read via refs above.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const viewMap = {
     devices: <DevicesView />,
