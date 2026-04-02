@@ -2,9 +2,14 @@ import { Trash, Pause, Play, ArrowDown, Search, Terminal, Square, Filter } from 
 import { useAppStore } from "../../store/useAppStore";
 import { LogLevel } from "../../types";
 import { toast } from "sonner";
-import { useLogcat } from "../../hooks/useLogcat";
 
-export function LogcatControls() {
+interface LogcatControlsProps {
+  isRunning: boolean;
+  onStart: () => void;
+  onStop: () => void;
+}
+
+export function LogcatControls({ isRunning, onStart, onStop }: LogcatControlsProps) {
   const logPaused = useAppStore((s) => s.logPaused);
   const setLogPaused = useAppStore((s) => s.setLogPaused);
   const clearLogLines = useAppStore((s) => s.clearLogLines);
@@ -14,8 +19,12 @@ export function LogcatControls() {
   const setMinLogLevel = useAppStore((s) => s.setMinLogLevel);
   const logcatArgs = useAppStore((s) => s.logcatArgs);
   const setLogcatArgs = useAppStore((s) => s.setLogcatArgs);
-  
-  const { isRunning, startLogcat, stopLogcat } = useLogcat();
+
+  const handleStop = async () => {
+    // Also clear pause state when stopping so the app isn't stuck
+    setLogPaused(false);
+    await onStop();
+  };
 
   return (
     <div style={{ display: "flex", gap: "16px", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid var(--color-surface-border)", background: "var(--color-surface-card)" }}>
@@ -69,7 +78,7 @@ export function LogcatControls() {
         {/* Presets */}
         <div style={{ position: "relative", width: "120px" }}>
           <Filter size={14} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--color-text-secondary)" }} />
-          <select 
+          <select
             onChange={(e) => {
               const val = e.target.value;
               if (val === "unity") setLogcatArgs("-v time Unity:V *:S");
@@ -101,7 +110,7 @@ export function LogcatControls() {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <select 
+        <select
           value={minLogLevel || ""}
           onChange={(e) => setMinLogLevel((e.target.value as LogLevel) || null)}
           style={{
@@ -126,7 +135,7 @@ export function LogcatControls() {
 
         {/* Start / Stop Button */}
         <button
-          onClick={isRunning ? stopLogcat : startLogcat}
+          onClick={isRunning ? handleStop : onStart}
           style={{
             display: "flex",
             alignItems: "center",
@@ -143,33 +152,29 @@ export function LogcatControls() {
           }}
         >
           {isRunning ? (
-            <>
-              <Square size={14} fill="white" /> Stop
-            </>
+            <><Square size={14} fill="white" /> Stop</>
           ) : (
-            <>
-              <Play size={14} fill="white" /> Start Stream
-            </>
+            <><Play size={14} fill="white" /> Start Stream</>
           )}
         </button>
 
-        <button 
-          className="icon-btn" 
+        <button
+          className="icon-btn"
           onClick={() => {
-             clearLogLines();
-             toast.success("Logs cleared");
+            clearLogLines();
+            toast.success("Logs cleared");
           }}
           title="Clear logs"
         >
           <Trash size={16} />
         </button>
 
-        <button 
+        <button
           className={`icon-btn ${logPaused ? "btn-accent" : ""}`}
           onClick={() => setLogPaused(!logPaused)}
           disabled={!isRunning}
           title={logPaused ? "Resume logging" : "Pause logging"}
-          style={{ 
+          style={{
             ...(logPaused ? { background: "var(--color-accent)", color: "white" } : {}),
             opacity: isRunning ? 1 : 0.5,
             cursor: isRunning ? "pointer" : "not-allowed"
@@ -178,8 +183,8 @@ export function LogcatControls() {
           {logPaused ? <Play size={16} fill="white" /> : <Pause size={16} fill="currentColor" />}
         </button>
 
-        <button 
-          className="icon-btn" 
+        <button
+          className="icon-btn"
           title="Scroll to bottom"
           onClick={() => {
             const viewer = document.getElementById("log-buffer");

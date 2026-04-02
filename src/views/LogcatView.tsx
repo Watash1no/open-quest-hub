@@ -7,8 +7,8 @@ import { useAppStore } from "../store/useAppStore";
 export function LogcatView() {
   const selectedDevice = useAppStore((s) => s.selectedSerial);
   
-  // Use the hook to handle streaming
-  useLogcat();
+  // Call useLogcat ONCE here and pass results down — prevents duplicate activeDeviceRefs
+  const { isRunning, startLogcat, stopLogcat } = useLogcat();
 
   return (
     <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "16px", height: "100%" }}>
@@ -21,6 +21,7 @@ export function LogcatView() {
           <h1 style={{ fontSize: "18px", fontWeight: 700, color: "var(--color-text-primary)", marginBottom: "2px" }}>Logcat Stream</h1>
           <p style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
             Real-time logs from {selectedDevice || "no device"}
+            {isRunning && <span style={{ marginLeft: "8px", color: "var(--color-success)", fontSize: "11px" }}>● Live</span>}
           </p>
         </div>
       </div>
@@ -32,7 +33,7 @@ export function LogcatView() {
         </div>
       ) : (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <LogcatControls />
+          <LogcatControls isRunning={isRunning} onStart={startLogcat} onStop={stopLogcat} />
           <LogcatViewer />
         </div>
       )}

@@ -167,6 +167,7 @@ pub async fn run_adb_device<R: Runtime>(app: &AppHandle<R>, device_id: &str, arg
 }
 
 /// Run an adb command and return a handle to its stdout for streaming.
+#[allow(dead_code)]
 pub fn run_adb_stream<R: Runtime>(app: &AppHandle<R>, args: &[&str]) -> Result<tokio::process::Child, AppError> {
     let adb = find_adb(app)?;
     let mut cmd = Command::new(&adb);

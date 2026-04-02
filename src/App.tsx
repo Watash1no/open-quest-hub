@@ -96,11 +96,19 @@ function App() {
               obbPaths: obbs
             }).catch(err => {
               console.error("Install failed", err);
+              // Bug 4 fix: Tauri errors can be strings or objects
+              const msg = typeof err === "string" ? err : (err?.message ?? err?.toString() ?? JSON.stringify(err));
               setInstallProgress({ 
                 status: "error", 
                 percent: -1, 
-                message: String(err),
+                message: msg,
                 files: files.map(f => ({ ...f, status: "error" }))
+              });
+              useAppStore.getState().addEvent({
+                kind: "error",
+                title: `Install failed: ${fileName}`,
+                detail: msg,
+                deviceModel: device.model,
               });
             });
           }
@@ -121,8 +129,9 @@ function App() {
     }>(
       "file-transfer-progress",
       (event) => {
-        const targetDevice = devices.find(d => d.id === event.payload.deviceId);
-        if (targetDevice?.serial === selectedSerial) {
+        // Bug 2 fix: read from refs, NOT from the closure — refs are always fresh
+        const targetDevice = devicesRef.current.find(d => d.id === event.payload.deviceId);
+        if (targetDevice?.serial === selectedSerialRef.current) {
           const { status, percent, message, filename, fileType } = event.payload;
           
           useAppStore.setState((state) => {
@@ -166,8 +175,23 @@ function App() {
           
           if (status === "done" && useAppStore.getState().installProgress.files.every(f => f.status === "done")) {
             toast.success("Installation complete!");
+            const prog = useAppStore.getState().installProgress;
+            useAppStore.getState().addEvent({
+              kind: "install",
+              title: `Installed: ${prog.appName ?? "build"}`,
+              detail: `${prog.files.length} file(s) installed successfully`,
+              deviceModel: devicesRef.current.find(d => d.serial === selectedSerialRef.current)?.model,
+            });
           } else if (status === "error") {
-            toast.error("Error", { description: message });
+            const msg = useAppStore.getState().installProgress.message;
+            const safeMsg = typeof msg === "string" ? msg : JSON.stringify(msg);
+            toast.error("Install error", { description: safeMsg });
+            useAppStore.getState().addEvent({
+              kind: "error",
+              title: `Install error`,
+              detail: safeMsg,
+              deviceModel: devicesRef.current.find(d => d.serial === selectedSerialRef.current)?.model,
+            });
           }
         }
       }
@@ -278,10 +302,10 @@ function App() {
             </div>
             <div style={{ textAlign: "center" }}>
               <h2 style={{ fontSize: "24px", fontWeight: 800, color: "white", marginBottom: "8px" }}>
-                Drop APK to Install
+                Drop APK / OBB to Install
               </h2>
               <p style={{ fontSize: "14px", color: "var(--color-text-secondary)" }}>
-                The build will be installed on the selected device
+                Drop APK alone, APK + OBB(s), or OBBs for an installed app
               </p>
             </div>
           </div>

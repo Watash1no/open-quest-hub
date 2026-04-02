@@ -55,6 +55,7 @@ export function DevicesView() {
   const selectedSerial = useAppStore((s) => s.selectedSerial);
   const setSelectedDevice = useAppStore((s) => s.setSelectedDevice);
   const setDevices = useAppStore((s) => s.setDevices);
+  const addEvent = useAppStore((s) => s.addEvent);
 
   const { 
     packages, 
@@ -70,9 +71,13 @@ export function DevicesView() {
   // Device Actions toggles
   const [boundary, setBoundary] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
+  const [wifiToggling, setWifiToggling] = useState(false);
   const isCasting = useAppStore((s) => s.isCasting);
   const setIsCasting = useAppStore((s) => s.setIsCasting);
   const [remoteMedia, setRemoteMedia] = useState<string[]>([]);
+
+  // Derive WiFi on/off from current device's connection types
+  const isWifi = selectedDevice?.connectionTypes.includes("WiFi") ?? false;
 
 
   const handleRefresh = async () => {
@@ -105,32 +110,32 @@ export function DevicesView() {
     try {
       const path = await invoke<string>("take_screenshot", { deviceId: selectedDevice.id });
       toast.success("Screenshot saved", { description: path });
+      addEvent({ kind: "screenshot", title: "Screenshot captured", detail: path.split(/[\\/]/).pop(), deviceModel: selectedDevice.model });
       // Refresh gallery
       const list = await invoke<string[]>("list_remote_media", { deviceId: selectedDevice.id });
       setRemoteMedia(list);
     } catch (err) {
       toast.error("Screenshot failed");
+      addEvent({ kind: "error", title: "Screenshot failed", deviceModel: selectedDevice.model });
     }
   };
 
   const handleRecord = async () => {
     if (!selectedDevice) return;
     const starting = !isRecording;
-    // Update local state IMMEDIATELY for snappy feedback
     setIsRecording(starting);
     try {
       await invoke<string>("record_video", { deviceId: selectedDevice.id, start: starting });
       toast.success(starting ? "Recording started" : "Recording stopped");
-      
+      addEvent({ kind: "record", title: starting ? "Recording started" : "Recording stopped", deviceModel: selectedDevice.model });
       if (!starting) {
-        // Refresh gallery after stopping record
         const list = await invoke<string[]>("list_remote_media", { deviceId: selectedDevice.id });
         setRemoteMedia(list);
       }
     } catch (err) {
-      // Revert if it failed
       setIsRecording(!starting);
       toast.error("Recording action failed");
+      addEvent({ kind: "error", title: "Recording failed", deviceModel: selectedDevice.model });
     }
   };
 
@@ -198,7 +203,6 @@ export function DevicesView() {
             device={d}
             isSelected={d.serial === (selectedSerial ?? devices[0]?.serial)}
             onSelect={() => setSelectedDevice(d.serial)}
-            onRefresh={handleRefresh}
           />
         ))}
       </div>
@@ -281,13 +285,11 @@ export function DevicesView() {
                          appName: fileName,
                          files: useAppStore.getState().installProgress.files.map(f => ({ ...f, percent: 100, status: "done" as const }))
                        });
-                       // Auto-hide overlay after 2 seconds
-                       setTimeout(() => {
-                         useAppStore.getState().setInstallProgress({ status: "none", percent: 0, files: [] });
-                       }, 2000);
+                       // Note: overlay auto-hides after 10s via InstallProgressOverlay's useEffect
                      }
                    } catch (e: any) {
-                     const msg = e?.message || String(e);
+                     // Bug 4 fix: Tauri errors can be objects — safely extract string
+                     const msg = typeof e === "string" ? e : (e?.message ?? (typeof e === "object" ? JSON.stringify(e) : String(e)));
                      toast.error("Install failed", { description: msg });
                      useAppStore.getState().setInstallProgress({ 
                        ...useAppStore.getState().installProgress,
@@ -330,6 +332,21 @@ export function DevicesView() {
               </div>
             )}
             
+            {/* Compact drag-and-drop hint */}
+            <div
+              style={{
+                margin: "8px 16px 12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "11px",
+                color: "var(--color-text-disabled)",
+              }}
+            >
+              <Upload size={12} strokeWidth={1.5} style={{ opacity: 0.5, flexShrink: 0 }} />
+              <span>Drag APK or APK+OBB anywhere onto the window to install</span>
+            </div>
+
             {packages.slice(0, 5).map((app: Package) => (
               <AppRow 
                 key={app.name} 
@@ -339,36 +356,6 @@ export function DevicesView() {
                 onUninstall={() => uninstallApp(app.name)}
               />
             ))}
-
-            {/* Drag-and-drop zone - now simplified as the main overlay covers it */}
-            <div
-              onDragOver={(e) => { e.preventDefault(); }}
-              style={{
-                margin: "12px",
-                border: "2px dashed var(--color-surface-border)",
-                borderRadius: "8px",
-                padding: "24px 16px",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "10px",
-                color: "var(--color-text-disabled)",
-                fontSize: "12px",
-                background: "rgba(255,255,255,0.02)",
-                cursor: "default",
-              }}
-            >
-              <Upload size={24} strokeWidth={1} style={{ opacity: 0.4 }} />
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontWeight: 600, color: "var(--color-text-secondary)" }}>
-                   Install APK via Drag & Drop
-                </div>
-                <div style={{ fontSize: "10px", marginTop: "2px" }}>
-                   Note: Drag & Drop is limited by security. Use "Add Build" for full access.
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* ── Section: Device Actions ── */}
@@ -394,15 +381,18 @@ export function DevicesView() {
                 label: isCasting ? "Stop Casting" : "Cast Device",
                 desc: isCasting ? "Casting in progress..." : "Mirror display via scrcpy",
                 action: async () => {
+                  if (!selectedDevice) return;
                   try {
                     if (isCasting) {
                       await invoke("stop_casting", { deviceId: selectedDevice.id });
                       setIsCasting(false);
                       toast.success("Casting stopped");
+                      addEvent({ kind: "cast", title: "Cast stopped", deviceModel: selectedDevice.model });
                     } else {
                       await invoke("cast_device", { deviceId: selectedDevice.id });
                       setIsCasting(true);
                       toast.success("Launching scrcpy...");
+                      addEvent({ kind: "cast", title: "Cast started", deviceModel: selectedDevice.model });
                     }
                   } catch (err) {
                     toast.error(isCasting ? "Failed to stop cast" : "Failed to cast", { 
@@ -434,22 +424,47 @@ export function DevicesView() {
               {
                 id: "wifi",
                 icon: <Wifi size={15} strokeWidth={1.8} />,
-                label: "Switch to Wireless",
-                desc: "Enable ADB over Wi-Fi (unplug later)",
-                action: async () => {
-                  if (!selectedDevice) return;
-                  toast.promise(invoke("setup_wireless_adb", { deviceId: selectedDevice.id }), {
-                    loading: "Configuring wireless ADB (stay plugged in)...",
-                    success: (ip) => {
-                      handleRefresh();
-                      return `Wireless ADB enabled on ${ip}! You can unplug now.`;
-                    },
-                    error: "Failed to setup wireless mode. Is the device on Wi-Fi?"
-                  });
-                },
-                btnLabel: "Switch"
+                label: "ADB over Wi-Fi",
+                desc: isWifi
+                  ? "Connected wirelessly — tap to disconnect"
+                  : "Enable wireless ADB (device must be on Wi-Fi)",
+                control: (
+                  <Toggle
+                    checked={isWifi}
+                    disabled={wifiToggling}
+                    onChange={async (enable) => {
+                      if (!selectedDevice) return;
+                      setWifiToggling(true);
+                      try {
+                        if (enable) {
+                          // Enable: setup wireless (get IP, tcpip 5555, connect)
+                          await toast.promise(
+                            invoke<string>("setup_wireless_adb", { deviceId: selectedDevice.id }),
+                            {
+                              loading: "Enabling Wi-Fi ADB (stay plugged in)...",
+                              success: (ip) => `Wi-Fi ADB enabled on ${ip}! You can unplug now.`,
+                              error: "Failed to enable Wi-Fi ADB. Is the device on Wi-Fi?",
+                            }
+                          );
+                        } else {
+                          // Disable: try USB mode, then disconnect
+                          try {
+                            await invoke("disable_wifi_adb", { deviceId: selectedDevice.id });
+                            toast.success("Switched back to USB mode");
+                          } catch {
+                            toast.info("Wi-Fi ADB disconnected");
+                          }
+                        }
+                        // Refresh device list to update connection type badge
+                        await handleRefresh();
+                      } finally {
+                        setWifiToggling(false);
+                      }
+                    }}
+                  />
+                )
               },
-            ].map(({ id, icon, label, desc, action, status, btnLabel }) => (
+            ].map(({ id, icon, label, desc, action, status, btnLabel, control }: any) => (
               <div
                 key={id}
                 className="table-row"
@@ -464,26 +479,28 @@ export function DevicesView() {
                   <div style={{ fontWeight: 500, fontSize: "13px" }}>{label}</div>
                   <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "1px" }}>{desc}</div>
                 </div>
-                <button
-                  style={{
-                    padding: "5px 14px",
-                    minWidth: "70px",
-                    borderRadius: "6px",
-                    border: "1px solid var(--color-surface-border)",
-                    background: status === "stop" ? "var(--color-error-muted)" : "transparent",
-                    color: status === "stop" ? "var(--color-error)" : "var(--color-text-primary)",
-                    fontSize: "12px",
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    fontFamily: "var(--font-sans)",
-                    transition: "all 0.15s",
-                  }}
-                  onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = status === "stop" ? "var(--color-error)" : "var(--color-surface-hover)")}
-                  onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = status === "stop" ? "var(--color-error-muted)" : "transparent")}
-                  onClick={action}
-                >
-                  {btnLabel}
-                </button>
+                {control ? control : (
+                  <button
+                    style={{
+                      padding: "5px 14px",
+                      minWidth: "70px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--color-surface-border)",
+                      background: status === "stop" ? "var(--color-error-muted)" : "transparent",
+                      color: status === "stop" ? "var(--color-error)" : "var(--color-text-primary)",
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      cursor: "pointer",
+                      fontFamily: "var(--font-sans)",
+                      transition: "all 0.15s",
+                    }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = status === "stop" ? "var(--color-error)" : "var(--color-surface-hover)")}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = status === "stop" ? "var(--color-error-muted)" : "transparent")}
+                    onClick={action}
+                  >
+                    {btnLabel}
+                  </button>
+                )}
               </div>
             ))}
 

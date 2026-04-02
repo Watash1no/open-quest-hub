@@ -1,11 +1,10 @@
-import { BatteryMedium, Usb, Wifi, RefreshCw } from "lucide-react";
+import { BatteryMedium, Usb, Wifi } from "lucide-react";
 import type { Device } from "../../types";
 
 interface DeviceCardProps {
   device: Device;
   isSelected: boolean;
   onSelect: () => void;
-  onRefresh: () => void;
 }
 
 const STATUS_COLOR: Record<Device["status"], string> = {
@@ -20,7 +19,7 @@ const STATUS_BG: Record<Device["status"], string> = {
   Offline: "rgba(102,102,102,0.12)",
 };
 
-export function DeviceCard({ device, isSelected, onSelect, onRefresh }: DeviceCardProps) {
+export function DeviceCard({ device, isSelected, onSelect }: DeviceCardProps) {
   return (
     <div
       role="button"
@@ -114,19 +113,6 @@ export function DeviceCard({ device, isSelected, onSelect, onRefresh }: DeviceCa
             {device.serial}
           </div>
         </div>
-
-        {/* Refresh button */}
-        <button
-          className="icon-btn"
-          title="Refresh"
-          style={{ width: "28px", height: "28px", flexShrink: 0 }}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRefresh();
-          }}
-        >
-          <RefreshCw size={13} strokeWidth={1.8} />
-        </button>
       </div>
 
       {/* Meta row */}

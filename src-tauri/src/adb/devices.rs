@@ -30,38 +30,40 @@ fn connection_type(serial: &str) -> ConnectionType {
 }
 
 /// Fetch extra device info (model, android version, battery, and hardware serial).
+/// Uses a single shell command with semicolons to halve ADB round-trips from 4 → 1.
 async fn fetch_device_info(app: &AppHandle, id: &str) -> Result<(String, String, i32, String), AppError> {
-    let model = run_adb_device(app, id, &["shell", "getprop", "ro.product.model"])
-        .await?
-        .trim()
-        .to_string();
+    // Run all 4 queries in one `adb shell` call separated by semicolons
+    let raw = run_adb_device(
+        app,
+        id,
+        &["shell",
+          "echo MODEL:$(getprop ro.product.model);echo ANDROID:$(getprop ro.build.version.release);echo SERIAL:$(getprop ro.serialno);dumpsys battery | grep level:"],
+    )
+    .await?;
 
-    let android_version = run_adb_device(app, id, &["shell", "getprop", "ro.build.version.release"])
-        .await?
-        .trim()
-        .to_string();
-    
-    let hardware_serial = run_adb_device(app, id, &["shell", "getprop", "ro.serialno"])
-        .await?
-        .trim()
-        .to_string();
+    let mut model = String::from("Unknown");
+    let mut android_version = String::from("Unknown");
+    let mut hardware_serial = String::new();
+    let mut battery_level: i32 = -1;
 
-    // Parse: "  level: 85\n" → 85
-    let battery_level = run_adb_device(app, id, &["shell", "dumpsys", "battery"])
-        .await
-        .unwrap_or_default()
-        .lines()
-        .find(|l| l.trim().starts_with("level:"))
-        .and_then(|l| l.split(':').nth(1))
-        .and_then(|v| v.trim().parse::<i32>().ok())
-        .unwrap_or(-1);
+    for line in raw.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("MODEL:") {
+            if !v.is_empty() { model = v.to_string(); }
+        } else if let Some(v) = line.strip_prefix("ANDROID:") {
+            if !v.is_empty() { android_version = v.to_string(); }
+        } else if let Some(v) = line.strip_prefix("SERIAL:") {
+            if !v.is_empty() { hardware_serial = v.to_string(); }
+        } else if line.trim_start().starts_with("level:") {
+            if let Some(v) = line.split(':').nth(1) {
+                battery_level = v.trim().parse().unwrap_or(-1);
+            }
+        }
+    }
 
-    Ok((
-        if model.is_empty() { "Unknown".into() } else { model },
-        if android_version.is_empty() { "Unknown".into() } else { android_version },
-        battery_level,
-        if hardware_serial.is_empty() { id.into() } else { hardware_serial },
-    ))
+    if hardware_serial.is_empty() { hardware_serial = id.to_string(); }
+
+    Ok((model, android_version, battery_level, hardware_serial))
 }
 
 /// Tauri command: list all connected ADB devices with metadata, merging USB and WiFi connections.

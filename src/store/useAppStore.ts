@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { LogLevel } from "../types";
-import type { ActiveView, Device, FileEntry, LogLine } from "../types";
+import type { ActiveView, Device, EventLogEntry, FileEntry, LogLine } from "../types";
 
 // ── State shape ─────────────────────────────────────────────────────────────
 
@@ -56,6 +56,9 @@ interface AppState {
   };
 
   adbStatus: "ready" | "loading" | "not_found" | "error";
+
+  // Session event journal (Bell panel) — resets on app restart
+  eventLog: EventLogEntry[];
 }
 
 // ── Actions ─────────────────────────────────────────────────────────────────
@@ -90,6 +93,10 @@ interface AppActions {
   setSettings: (settings: Partial<AppState["settings"]>) => void;
 
   setAdbStatus: (status: AppState["adbStatus"]) => void;
+
+  // Event journal
+  addEvent: (entry: Omit<EventLogEntry, "id" | "timestamp">) => void;
+  clearEvents: () => void;
 }
 
 // ── Max logcat buffer size (configurable later via Settings) ─────────────────
@@ -126,6 +133,8 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   },
 
   adbStatus: "loading",
+
+  eventLog: [],
 
   // Actions
   setDevices: (devices) => set({ devices }),
@@ -166,4 +175,17 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
     set((state) => ({ settings: { ...state.settings, ...newSettings } })),
 
   setAdbStatus: (adbStatus) => set({ adbStatus }),
+
+  addEvent: (entry) =>
+    set((state) => {
+      const newEntry: EventLogEntry = {
+        ...entry,
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: Date.now(),
+      };
+      const next = [newEntry, ...state.eventLog];
+      return { eventLog: next.slice(0, 100) }; // keep last 100
+    }),
+
+  clearEvents: () => set({ eventLog: [] }),
 }));

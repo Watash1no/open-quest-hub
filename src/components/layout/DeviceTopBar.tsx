@@ -2,14 +2,14 @@ import {
   Cast,
   Video,
   Camera,
-  RotateCcw,
-  Power,
-  ScrollText,
   Cpu,
   BatteryCharging,
   Wifi,
+  Square,
 } from "lucide-react";
 import { useAppStore } from "../../store/useAppStore";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 
 // ── DeviceTopBar ─────────────────────────────────────────────────────────────
 
@@ -17,9 +17,68 @@ export function DeviceTopBar() {
   const devices = useAppStore((s) => s.devices);
   const selectedSerial = useAppStore((s) => s.selectedSerial);
   const setSelectedDevice = useAppStore((s) => s.setSelectedDevice);
-  const setActiveView = useAppStore((s) => s.setActiveView);
+  const isCasting = useAppStore((s) => s.isCasting);
+  const setIsCasting = useAppStore((s) => s.setIsCasting);
+  const addEvent = useAppStore((s) => s.addEvent);
 
   const device = devices.find((d) => d.serial === selectedSerial) ?? devices[0] ?? null;
+
+  // ── Quick action handlers (mirror Device Actions section) ─────────────────
+
+  const handleCast = async () => {
+    if (!device) return;
+    try {
+      if (isCasting) {
+        await invoke("stop_casting", { deviceId: device.id });
+        setIsCasting(false);
+        toast.success("Casting stopped");
+        addEvent({ kind: "cast", title: "Cast stopped", deviceModel: device.model });
+      } else {
+        await invoke("cast_device", { deviceId: device.id });
+        setIsCasting(true);
+        toast.success("Launching scrcpy...");
+        addEvent({ kind: "cast", title: "Cast started", deviceModel: device.model });
+      }
+    } catch {
+      toast.error(isCasting ? "Failed to stop cast" : "Failed to cast", {
+        description: "Make sure scrcpy is installed and in your PATH.",
+      });
+    }
+  };
+
+  const handleRecord = async () => {
+    if (!device) return;
+    // We don't have isRecording state here — use a simpler toggle via isCasting sibling
+    // For TopBar, we call the command and show appropriate toast
+    try {
+      await invoke<string>("record_video", { deviceId: device.id, start: true });
+      toast.success("Recording started", { description: "Go back to Devices to stop." });
+      addEvent({ kind: "record", title: "Recording started", deviceModel: device.model });
+    } catch {
+      toast.error("Recording failed");
+    }
+  };
+
+  const handleScreenshot = async () => {
+    if (!device) return;
+    try {
+      const path = await invoke<string>("take_screenshot", { deviceId: device.id });
+      toast.success("Screenshot saved", { description: path });
+      addEvent({
+        kind: "screenshot",
+        title: "Screenshot captured",
+        detail: path.split(/[\\/]/).pop(),
+        deviceModel: device.model,
+      });
+    } catch {
+      toast.error("Screenshot failed");
+      addEvent({
+        kind: "error",
+        title: "Screenshot failed",
+        deviceModel: device.model,
+      });
+    }
+  };
 
   return (
     <header
@@ -139,35 +198,37 @@ export function DeviceTopBar() {
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
-      {/* Quick action buttons */}
+      {/* Quick action buttons — now fully wired */}
       <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-        <button className="icon-btn" title="Cast device" disabled={!device}>
-          <Cast size={15} strokeWidth={1.8} />
+        <button
+          className="icon-btn"
+          title={isCasting ? "Stop casting" : "Cast device (scrcpy)"}
+          disabled={!device}
+          onClick={handleCast}
+          style={{
+            color: isCasting ? "var(--color-error, #f87171)" : undefined,
+            background: isCasting ? "var(--color-error-muted, rgba(248,113,113,0.1))" : undefined,
+          }}
+        >
+          {isCasting ? <Square size={15} strokeWidth={1.8} /> : <Cast size={15} strokeWidth={1.8} />}
         </button>
-        <button className="icon-btn" title="Record video" disabled={!device}>
-          <Video size={15} strokeWidth={1.8} />
-        </button>
-        <button className="icon-btn" title="Screenshot" disabled={!device}>
-          <Camera size={15} strokeWidth={1.8} />
-        </button>
-
-        <div style={{ width: "1px", height: "20px", background: "var(--color-surface-border)", margin: "0 4px" }} />
 
         <button
           className="icon-btn"
-          title="Device Logs"
-          onClick={() => setActiveView("logcat")}
+          title="Start screen recording"
+          disabled={!device}
+          onClick={handleRecord}
         >
-          <ScrollText size={15} strokeWidth={1.8} />
+          <Video size={15} strokeWidth={1.8} />
         </button>
 
-        <div style={{ width: "1px", height: "20px", background: "var(--color-surface-border)", margin: "0 4px" }} />
-
-        <button className="icon-btn" title="Refresh" disabled={!device}>
-          <RotateCcw size={15} strokeWidth={1.8} />
-        </button>
-        <button className="icon-btn" title="Power" disabled={!device}>
-          <Power size={15} strokeWidth={1.8} />
+        <button
+          className="icon-btn"
+          title="Take screenshot"
+          disabled={!device}
+          onClick={handleScreenshot}
+        >
+          <Camera size={15} strokeWidth={1.8} />
         </button>
       </div>
     </header>

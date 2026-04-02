@@ -7,7 +7,10 @@ import {
   Bell,
   Info,
 } from "lucide-react";
+import { useState } from "react";
 import { useAppStore } from "../../store/useAppStore";
+import { NotificationsPanel } from "./NotificationsPanel";
+import { AboutModal } from "./AboutModal";
 import type { ActiveView } from "../../types";
 
 // ── Nav item definition ──────────────────────────────────────────────────────
@@ -30,6 +33,27 @@ const TOP_NAV: NavItem[] = [
 export function Sidebar() {
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
+  const eventLog = useAppStore((s) => s.eventLog);
+
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  // Track last-seen count to compute unread badge
+  const [lastSeenCount, setLastSeenCount] = useState(0);
+  const unreadCount = Math.max(0, eventLog.length - lastSeenCount);
+
+  const handleBellClick = () => {
+    setNotifOpen((v) => {
+      const next = !v;
+      if (next) setLastSeenCount(eventLog.length); // mark all as read
+      return next;
+    });
+    setAboutOpen(false);
+  };
+
+  const handleInfoClick = () => {
+    setAboutOpen((v) => !v);
+    setNotifOpen(false);
+  };
 
   return (
     <aside
@@ -133,22 +157,72 @@ export function Sidebar() {
 
       {/* Bottom utility icons */}
       <div style={{ display: "flex", flexDirection: "column", gap: "2px", alignItems: "center" }}>
-        {[
-          { icon: Bell, label: "Notifications" },
-          { icon: Info, label: "About" },
-          { icon: Settings, label: "Settings" },
-        ].map(({ icon: Icon, label }) => (
-          <button
-            key={label}
-            className="icon-btn"
-            title={label}
-            onClick={() => label === "Settings" && setActiveView("settings")}
-            style={{ width: "40px", height: "40px" }}
-          >
-            <Icon size={16} strokeWidth={1.8} />
-          </button>
-        ))}
+
+        {/* Bell — event journal */}
+        <button
+          className="icon-btn"
+          title="Session Events"
+          onClick={handleBellClick}
+          style={{
+            width: "40px",
+            height: "40px",
+            position: "relative",
+            color: notifOpen ? "var(--color-accent)" : undefined,
+            background: notifOpen ? "var(--color-accent-muted)" : undefined,
+          }}
+        >
+          <Bell size={16} strokeWidth={1.8} />
+          {unreadCount > 0 && (
+            <span
+              style={{
+                position: "absolute",
+                top: "6px",
+                right: "6px",
+                width: "8px",
+                height: "8px",
+                borderRadius: "50%",
+                background: "var(--color-error, #f87171)",
+                border: "1.5px solid var(--color-surface-sidebar)",
+                display: "block",
+              }}
+            />
+          )}
+        </button>
+
+        {/* Info — About */}
+        <button
+          className="icon-btn"
+          title="About"
+          onClick={handleInfoClick}
+          style={{
+            width: "40px",
+            height: "40px",
+            color: aboutOpen ? "var(--color-accent)" : undefined,
+            background: aboutOpen ? "var(--color-accent-muted)" : undefined,
+          }}
+        >
+          <Info size={16} strokeWidth={1.8} />
+        </button>
+
+        {/* Settings */}
+        <button
+          className="icon-btn"
+          title="Settings"
+          onClick={() => setActiveView("settings")}
+          style={{
+            width: "40px",
+            height: "40px",
+            color: activeView === "settings" ? "var(--color-accent)" : undefined,
+            background: activeView === "settings" ? "var(--color-accent-muted)" : undefined,
+          }}
+        >
+          <Settings size={16} strokeWidth={1.8} />
+        </button>
       </div>
+
+      {/* Floating panels */}
+      <NotificationsPanel open={notifOpen} onClose={() => setNotifOpen(false)} />
+      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </aside>
   );
 }

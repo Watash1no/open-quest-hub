@@ -139,3 +139,32 @@ pub async fn pull_file(
         }
     }
 }
+
+// ── P3.3: join_path ───────────────────────────────────────────────────────────
+
+/// Cross-platform: joins a directory and a filename into a full path.
+/// Returns backslash-separated on Windows, forward-slash on Unix.
+#[tauri::command]
+pub fn join_path(dir: String, filename: String) -> Result<String, String> {
+    let path = std::path::PathBuf::from(&dir).join(&filename);
+    path.to_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Invalid path characters".to_string())
+}
+
+// ── P3.4: save_setting ────────────────────────────────────────────────────────
+
+/// Persists a single key-value setting to the tauri-plugin-store.
+#[tauri::command]
+pub fn save_setting<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    use tauri_plugin_store::StoreExt;
+    if let Some(store) = app.get_store("settings.json") {
+        store.set(key, serde_json::Value::String(value));
+        store.save().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}

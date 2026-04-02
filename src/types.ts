@@ -53,3 +53,16 @@ export interface LogLine {
 // ── View names ─────────────────────────────────────────────────────────────
 
 export type ActiveView = "devices" | "apps" | "logcat" | "files" | "settings";
+
+// ── Event Journal ────────────────────────────────────────────────────────────
+
+export type EventKind = "install" | "uninstall" | "error" | "screenshot" | "record" | "cast" | "info";
+
+export interface EventLogEntry {
+  id: string;
+  kind: EventKind;
+  title: string;
+  detail?: string;
+  deviceModel?: string;
+  timestamp: number; // Date.now()
+}

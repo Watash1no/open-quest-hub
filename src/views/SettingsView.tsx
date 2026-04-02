@@ -31,11 +31,17 @@ export function SettingsView() {
         title: "Select Download Directory"
       });
       if (selected && typeof selected === "string") {
-        updateSettings({ downloadDir: selected });
+        await updateSettings({ downloadDir: selected });
+      } else if (Array.isArray(selected) && selected[0]) {
+        await updateSettings({ downloadDir: selected[0] });
       }
     } catch (err) {
       console.error("Failed to pick directory:", err);
     }
+  };
+
+  const handleClearDir = async () => {
+    await updateSettings({ downloadDir: "" });
   };
 
   return (
@@ -142,28 +148,44 @@ export function SettingsView() {
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             <label style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>Default Download Directory</label>
             <div style={{ display: "flex", gap: "8px" }}>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 readOnly
-                value={settings.downloadDir || "Default system location"}
-                style={{ 
-                  flex: 1, 
-                  background: "rgba(255,255,255,0.03)", 
-                  border: "1px solid var(--color-surface-border)", 
-                  borderRadius: "6px", 
+                value={settings.downloadDir || ""}
+                placeholder="Not set — will ask on first download"
+                style={{
+                  flex: 1,
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid var(--color-surface-border)",
+                  borderRadius: "6px",
                   padding: "8px 12px",
-                  color: "var(--color-text-secondary)",
-                  fontSize: "13px"
+                  color: settings.downloadDir ? "var(--color-text-primary)" : "var(--color-text-disabled)",
+                  fontSize: "13px",
+                  fontFamily: settings.downloadDir ? "monospace" : "inherit",
                 }}
               />
-              <button 
-                className="icon-btn" 
+              <button
+                className="icon-btn"
                 onClick={handlePickDir}
+                title="Choose folder"
                 style={{ width: "36px", height: "36px", background: "var(--color-surface-card)", border: "1px solid var(--color-surface-border)" }}
               >
                 <FolderOpen size={16} />
               </button>
+              {settings.downloadDir && (
+                <button
+                  className="icon-btn"
+                  onClick={handleClearDir}
+                  title="Clear saved path"
+                  style={{ width: "36px", height: "36px", background: "var(--color-surface-card)", border: "1px solid var(--color-surface-border)", color: "var(--color-error, #f87171)" }}
+                >
+                  ✕
+                </button>
+              )}
             </div>
+            <p style={{ fontSize: "11px", color: "var(--color-text-disabled)" }}>
+              Files downloaded from the device will be saved here. Remembered across sessions.
+            </p>
           </div>
         </section>
 

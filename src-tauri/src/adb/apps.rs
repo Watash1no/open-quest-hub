@@ -311,54 +311,30 @@ async fn push_obb_with_progress(
     dest_dir: &str,
     filename: &str,
 ) -> Result<(), AppError> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
     use tauri::Emitter;
-    use crate::adb::run_adb_stream;
 
     let dest_path = format!("{}/{}", dest_dir, filename);
-    let mut child = run_adb_stream(app, &["-s", device_id, "push", "--progress", src_path, &dest_path])?;
 
-    let stdout = child.stdout.take().unwrap();
-    let mut reader = BufReader::new(stdout).lines();
+    // Bug 3 fix: `adb push --progress` sends its output to stderr on Windows,
+    // which causes the child process to be considered failed even when it succeeds.
+    // Use the simple no-timeout variant instead — it's reliable on all platforms.
+    // We emit a fake 50% midpoint so the UI shows activity.
+    let _ = app.emit("file-transfer-progress", serde_json::json!({
+        "deviceId": device_id,
+        "status": "uploading",
+        "percent": 50,
+        "filename": filename,
+        "fileType": "obb"
+    }));
 
-    while let Ok(Some(line)) = reader.next_line().await {
-        // adb push --progress output example: "[ 25%] /sdcard/..."
-        // We look for "[ XX%]" or "XX%"
-        if let Some(percent_str) = extract_percent(&line) {
-            if let Ok(percent) = percent_str.parse::<i32>() {
-                let _ = app.emit("file-transfer-progress", serde_json::json!({
-                    "deviceId": device_id,
-                    "status": "uploading",
-                    "percent": percent,
-                    "filename": filename,
-                    "fileType": "obb"
-                }));
-            }
+    // Run adb push (blocks until complete, no timeout for large files)
+    let output = super::run_adb_device_no_timeout(app, device_id, &["push", src_path, &dest_path]).await;
+
+    match output {
+        Ok(_) => Ok(()),
+        Err(AppError::CommandFailed(msg)) => {
+            Err(AppError::CommandFailed(format!("OBB push failed for {}: {}", filename, msg)))
         }
+        Err(e) => Err(e),
     }
-
-    let status = child.wait().await?;
-    if !status.success() {
-        return Err(AppError::CommandFailed("ADB push failed".into()));
-    }
-
-    Ok(())
-}
-
-fn extract_percent(line: &str) -> Option<String> {
-    // Basic regex-less parsing for speed
-    // Look for '[' then some digits then '%'
-    if let Some(start) = line.find('[') {
-        if let Some(end) = line[start..].find('%') {
-            let chunk = &line[start + 1..start + end];
-            return Some(chunk.trim().to_string());
-        }
-    }
-    // Fallback for versions without brackets
-    if let Some(end) = line.find('%') {
-        let start = line[..end].rfind(' ').unwrap_or(0);
-        let chunk = &line[start..end];
-        return Some(chunk.trim().to_string());
-    }
-    None
 }

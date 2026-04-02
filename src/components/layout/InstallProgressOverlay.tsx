@@ -1,15 +1,25 @@
 import { useAppStore } from "../../store/useAppStore";
 import { Check, X, Loader2, Package, FileText } from "lucide-react";
+import { useEffect } from "react";
 
 export function InstallProgressOverlay() {
   const installProgress = useAppStore((s) => s.installProgress);
   const setInstallProgress = useAppStore((s) => s.setInstallProgress);
 
+  const isComplete = installProgress.status === "done" || installProgress.status === "error";
+
+  // Bug 1 fix: auto-dismiss overlay 10 seconds after completion
+  useEffect(() => {
+    if (!isComplete) return;
+    const timer = setTimeout(() => {
+      setInstallProgress({ status: "none", percent: 0, files: [] });
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [isComplete]);
+
   if (installProgress.status === "none" || installProgress.files.length === 0) {
     return null;
   }
-
-  const isComplete = installProgress.status === "done" || installProgress.status === "error";
 
   return (
     <div
@@ -103,12 +113,30 @@ export function InstallProgressOverlay() {
           style={{ 
             padding: "8px 16px", 
             fontSize: "11px", 
-            color: "var(--color-danger)", 
-            background: "var(--color-danger-muted)",
+            color: "var(--color-error, #f87171)", 
+            background: "rgba(248,113,113,0.08)",
             borderTop: "1px solid var(--color-surface-border)"
           }}
         >
-          {installProgress.message}
+          {/* Bug 4 fix: safely stringify error message */}
+          {typeof installProgress.message === "string"
+            ? installProgress.message
+            : JSON.stringify(installProgress.message)}
+        </div>
+      )}
+
+      {/* Auto-dismiss countdown hint */}
+      {isComplete && (
+        <div
+          style={{
+            padding: "6px 16px",
+            fontSize: "10px",
+            color: "var(--color-text-disabled)",
+            borderTop: "1px solid var(--color-surface-border)",
+            textAlign: "center",
+          }}
+        >
+          Closes automatically in 10 seconds
         </div>
       )}
     </div>
@@ -138,8 +166,8 @@ function CircularProgress({ percent, status, type }: { percent: number; status: 
     );
   }
 
-  // APK Spinner (Indeterminate)
-  if (type === "apk" && (status === "installing" || status === "uploading")) {
+  // Spinner for any active state
+  if (status === "installing" || status === "uploading" || status === "pending") {
     return (
       <div style={{ animation: "spin 1s linear infinite", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <Loader2 size={24} color="var(--color-accent)" />
