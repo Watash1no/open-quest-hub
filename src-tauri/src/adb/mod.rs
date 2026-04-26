@@ -3,6 +3,8 @@ pub mod apps;
 pub mod logcat;
 pub mod files;
 pub mod controls;
+pub mod scrcpy_installer;
+
 
 use std::path::PathBuf;
 use tokio::process::Command;

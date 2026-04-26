@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "openquest-hub",
+  "productName": "Open Quest Hub",
   "version": "0.1.0",
   "identifier": "dev.openquest.hub",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "OpenQuest Hub",
+        "title": "Open Quest Hub",
         "width": 1000,
         "height": 700,
         "decorations": false,

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, Trash2, MoreVertical, Search, RefreshCw, Loader2 } from "lucide-react";
+import { Play, Trash2, Search, RefreshCw, Loader2 } from "lucide-react";
 import type { Package } from "../../types";
 
 interface AppListProps {
@@ -64,27 +64,24 @@ export function AppList({ packages, isLoading, onLaunch, onUninstall, onRefresh 
           </div>
         ) : (
           <>
-            <div className="table-row" style={{ gridTemplateColumns: "1fr 100px 100px", fontWeight: 600, fontSize: "11px", color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", background: "rgba(255,255,255,0.02)" }}>
+            <div className="table-row" style={{ gridTemplateColumns: "1fr 120px 100px", fontWeight: 600, fontSize: "11px", color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", background: "rgba(255,255,255,0.02)" }}>
               <span>Application</span>
               <span>Version</span>
               <span style={{ textAlign: "right" }}>Actions</span>
             </div>
             {filtered.map((pkg) => (
-              <div key={pkg.name} className="table-row" style={{ gridTemplateColumns: "1fr 100px 100px" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                  <span style={{ fontWeight: 500, fontSize: "13px" }}>{pkg.label || pkg.name}</span>
-                  <span style={{ fontSize: "11px", color: "var(--color-text-secondary)", fontFamily: "var(--font-mono)" }}>{pkg.name}</span>
+              <div key={pkg.name} className="table-row" style={{ gridTemplateColumns: "1fr 120px 100px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
+                  <span style={{ fontWeight: 500, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pkg.label || pkg.name}</span>
+                  <span style={{ fontSize: "11px", color: "var(--color-text-secondary)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pkg.name}</span>
                 </div>
-                <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>{pkg.version || "Unknown"}</span>
+                <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pkg.version || "Unknown"}</span>
                 <div style={{ display: "flex", gap: "4px", justifyContent: "flex-end" }}>
                   <button className="icon-btn" title="Launch" onClick={() => onLaunch(pkg.name)}>
                     <Play size={14} fill="currentColor" />
                   </button>
                   <button className="icon-btn" title="Uninstall" style={{ color: "var(--color-danger)" }} onClick={() => onUninstall(pkg.name)}>
                     <Trash2 size={14} />
-                  </button>
-                  <button className="icon-btn" title="More">
-                    <MoreVertical size={14} />
                   </button>
                 </div>
               </div>

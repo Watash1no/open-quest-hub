@@ -11,89 +11,89 @@ import type { LogLine } from "../types";
  * Calling it multiple times creates separate activeDeviceRefs which break stop.
  */
 export function useLogcat() {
-  const selectedDevice = useAppStore((s) => s.selectedSerial);
+  const devices = useAppStore((s) => s.devices);
+  const selectedSerial = useAppStore((s) => s.selectedSerial);
   const appendLogLines = useAppStore((s) => s.appendLogLines);
   const logcatArgs = useAppStore((s) => s.logcatArgs);
   const clearLogs = useAppStore((s) => s.clearLogs);
   const isRunning = useAppStore((s) => s.isLogcatRunning);
   const setIsRunning = useAppStore((s) => s.setIsLogcatRunning);
 
+  // Resolve the current ADB ID (serial or IP:Port) from the stable hardware serial
+  const device = devices.find(d => d.serial === selectedSerial);
+  const deviceId = device?.id || selectedSerial;
+
   // Tracks which device ID was passed to start_logcat
-  // so stop_logcat uses the SAME key the Rust map uses.
-  const activeDeviceRef = useRef<string | null>(null);
+  const activeDeviceIdRef = useRef<string | null>(null);
 
   const startLogcat = async () => {
-    if (!selectedDevice) return;
+    if (!deviceId) return;
     try {
       clearLogs();
       await invoke("start_logcat", {
-        deviceId: selectedDevice,
+        deviceId: deviceId,
         customArgs: logcatArgs,
       });
       setIsRunning(true);
-      activeDeviceRef.current = selectedDevice;
+      activeDeviceIdRef.current = deviceId;
     } catch (err) {
       toast.error("Failed to start logcat");
     }
   };
 
   const stopLogcat = async () => {
-    // Use the device id that was used to START logcat, not the current selection.
-    // This is critical — if the user switches devices, activeDeviceRef still holds
-    // the old ID which is the key in the Rust HashMap.
-    const deviceToStop = activeDeviceRef.current;
-    if (!deviceToStop) return;
+    const idToStop = activeDeviceIdRef.current;
+    if (!idToStop) return;
     try {
-      await invoke("stop_logcat", { deviceId: deviceToStop });
+      await invoke("stop_logcat", { deviceId: idToStop });
     } catch (err) {
       console.error("stop_logcat failed:", err);
     } finally {
-      // Always clear state regardless of backend success
       setIsRunning(false);
-      activeDeviceRef.current = null;
+      activeDeviceIdRef.current = null;
     }
   };
 
-  // Auto-stop when navigating away from Logcat (component unmount)
+  // Auto-stop when navigating away
   useEffect(() => {
     return () => {
-      const deviceToStop = activeDeviceRef.current;
-      if (deviceToStop) {
-        invoke("stop_logcat", { deviceId: deviceToStop }).catch(console.error);
+      const idToStop = activeDeviceIdRef.current;
+      if (idToStop) {
+        invoke("stop_logcat", { deviceId: idToStop }).catch(console.error);
         useAppStore.getState().setIsLogcatRunning(false);
-        activeDeviceRef.current = null;
+        activeDeviceIdRef.current = null;
       }
     };
   }, []);
 
   // Auto-stop when selected device changes
   useEffect(() => {
-    const prev = activeDeviceRef.current;
-    if (prev && prev !== selectedDevice) {
-      invoke("stop_logcat", { deviceId: prev }).catch(console.error);
+    const prevId = activeDeviceIdRef.current;
+    if (prevId && prevId !== deviceId) {
+      invoke("stop_logcat", { deviceId: prevId }).catch(console.error);
       setIsRunning(false);
-      activeDeviceRef.current = null;
+      activeDeviceIdRef.current = null;
     }
-  }, [selectedDevice, setIsRunning]);
+  }, [deviceId, setIsRunning]);
 
   // Listen for logcat events
   useEffect(() => {
-    if (!selectedDevice) {
+    if (!deviceId) {
       setIsRunning(false);
       return;
     }
 
     const unlistenLines = listen<LogLine[]>("logcat-lines", (event) => {
-      // Assuming all lines in a batch belong to the same device
-      if (event.payload.length > 0 && event.payload[0].deviceId === selectedDevice) {
+      // Check if the lines belong to the device currently being tracked by this hook instance
+      if (event.payload.length > 0 && event.payload[0].deviceId === activeDeviceIdRef.current) {
         appendLogLines(event.payload);
       }
     });
 
     const unlistenStopped = listen<string>("logcat-stopped", (event) => {
-      if (event.payload === selectedDevice) {
+      if (event.payload === activeDeviceIdRef.current) {
         setIsRunning(false);
-        activeDeviceRef.current = null;
+        activeDeviceIdRef.current = null;
       }
     });
 
@@ -101,7 +101,7 @@ export function useLogcat() {
       unlistenLines.then((f) => f());
       unlistenStopped.then((f) => f());
     };
-  }, [selectedDevice, appendLogLines, setIsRunning]);
+  }, [deviceId, appendLogLines, setIsRunning]);
 
   return { isRunning, startLogcat, stopLogcat };
 }

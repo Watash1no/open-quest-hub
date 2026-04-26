@@ -1,7 +1,6 @@
-import { Package, RefreshCw, Plus, HardDrive, Trash2 } from "lucide-react";
+import { Package, RefreshCw, Plus, HardDrive, Trash2, Upload } from "lucide-react";
 import { useApps } from "../hooks/useApps";
 import { AppList } from "../components/apps/AppList";
-import { InstallDropzone } from "../components/apps/InstallDropzone";
 import { useAppStore } from "../store/useAppStore";
 
 import { invoke } from "@tauri-apps/api/core";
@@ -10,15 +9,20 @@ import { useState } from "react";
 
 export function AppsView() {
   const { packages, isLoading, refresh, launchApp, uninstallApp } = useApps();
-  const selectedDevice = useAppStore((s) => s.selectedSerial);
+  const devices = useAppStore((s) => s.devices);
+  const selectedSerial = useAppStore((s) => s.selectedSerial);
   const [abandoned, setAbandoned] = useState<string[]>([]);
   const [loadingCleanup, setLoadingCleanup] = useState(false);
 
+  // Resolve the current ADB ID (serial or IP:Port) from the stable hardware serial
+  const device = devices.find(d => d.serial === selectedSerial);
+  const deviceId = device?.id || selectedSerial;
+
   const handleScanAbandoned = async () => {
-    if (!selectedDevice) return;
+    if (!deviceId) return;
     setLoadingCleanup(true);
     try {
-      const list = await invoke<string[]>("list_abandoned_obbs", { deviceId: selectedDevice });
+      const list = await invoke<string[]>("list_abandoned_obbs", { deviceId });
       setAbandoned(list);
       if (list.length === 0) toast.info("No abandoned OBBs found");
     } catch (err) {
@@ -30,7 +34,7 @@ export function AppsView() {
 
   const handleDeleteObb = async (pkg: string) => {
     try {
-      await invoke("delete_obb_folder", { deviceId: selectedDevice, package: pkg });
+      await invoke("delete_obb_folder", { deviceId, package: pkg });
       setAbandoned(prev => prev.filter(p => p !== pkg));
       toast.success(`Deleted OBB for ${pkg}`);
     } catch (err) {
@@ -45,10 +49,83 @@ export function AppsView() {
         <Package size={20} color="var(--color-accent)" strokeWidth={2} />
         <h1 style={{ fontSize: "18px", fontWeight: 700, color: "var(--color-text-primary)" }}>App Manager</h1>
         <div style={{ flex: 1 }} />
+        
+        {selectedSerial && (
+          <button
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "6px 14px",
+              borderRadius: "8px",
+              border: "none",
+              background: isLoading ? "var(--color-surface-border)" : "var(--color-accent)",
+              color: "#fff",
+              fontSize: "13px",
+              fontWeight: 600,
+              cursor: isLoading ? "not-allowed" : "pointer",
+              transition: "all 0.15s",
+            }}
+            disabled={isLoading}
+            onClick={async () => {
+              try {
+                const { open } = await import("@tauri-apps/plugin-dialog");
+                const selected = await open({
+                  multiple: true,
+                  filters: [{ name: "Android Files", extensions: ["apk", "obb"] }]
+                });
+                
+                if (selected && Array.isArray(selected) && selected.length > 0) {
+                  const apks = selected.filter(p => p.toLowerCase().endsWith(".apk"));
+                  const obbs = selected.filter(p => p.toLowerCase().endsWith(".obb"));
+                  
+                  const fileName = apks.length > 0 ? apks[0].split(/[\\/]/).pop()! : obbs[0].split(/[\\/]/).pop()!;
+                  
+                  const files = [
+                    ...apks.map(p => ({ name: p.split(/[\\/]/).pop()!, type: "apk" as const, percent: 0, status: "pending" as const })),
+                    ...obbs.map(p => ({ name: p.split(/[\\/]/).pop()!, type: "obb" as const, percent: 0, status: "pending" as const }))
+                  ];
+
+                  useAppStore.getState().setInstallProgress({ 
+                    status: "starting", 
+                    percent: 0, 
+                    appName: fileName,
+                    files
+                  });
+
+                  await invoke("install_with_obb", { 
+                    deviceId, 
+                    apkPath: apks.length > 0 ? apks[0] : null,
+                    obbPaths: obbs
+                  });
+                  refresh();
+                  useAppStore.getState().setInstallProgress({ 
+                    status: "done",
+                    percent: 100,
+                    appName: fileName,
+                    files: useAppStore.getState().installProgress.files.map(f => ({ ...f, percent: 100, status: "done" as const }))
+                  });
+                }
+              } catch (e: any) {
+                const msg = typeof e === "string" ? e : (e?.message ?? (typeof e === "object" ? JSON.stringify(e) : String(e)));
+                toast.error("Install failed", { description: msg });
+                useAppStore.getState().setInstallProgress({ 
+                  ...useAppStore.getState().installProgress,
+                  status: "error",
+                  message: msg
+                });
+              }
+            }}
+          >
+            <Plus size={14} strokeWidth={2.5} />
+            Add Build
+          </button>
+        )}
+
         <button 
           className="icon-btn" 
           onClick={() => refresh()} 
-          disabled={isLoading || !selectedDevice}
+          disabled={isLoading || !selectedSerial}
           title="Refresh List"
           style={{ background: "var(--color-surface-card)", border: "1px solid var(--color-surface-border)", borderRadius: "8px", width: "36px", height: "36px" }}
         >
@@ -56,7 +133,7 @@ export function AppsView() {
         </button>
       </div>
 
-      {!selectedDevice ? (
+      {!selectedSerial ? (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--color-text-disabled)" }}>
           <Package size={48} strokeWidth={1} style={{ opacity: 0.2, marginBottom: "16px" }} />
           <p>Please select a device to manage apps</p>
@@ -74,19 +151,16 @@ export function AppsView() {
             />
           </div>
 
-          {/* Right Sidebar Area (Install) */}
+          {/* Right Sidebar Area */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "20px" }}>
-            <div className="section-card" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "16px", flexShrink: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <Plus size={16} color="var(--color-accent)" strokeWidth={2} />
-                <span style={{ fontWeight: 700, fontSize: "14px" }}>Install New</span>
-              </div>
-              
-              <InstallDropzone />
-              
-              <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
-                <p>TIP: You can also use the drag-and-drop zone in the Devices section.</p>
-              </div>
+            <div className="section-card" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+               <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--color-text-primary)" }}>
+                 <Upload size={16} color="var(--color-accent)" strokeWidth={2} />
+                 <span style={{ fontWeight: 700, fontSize: "14px" }}>Quick Tip</span>
+               </div>
+               <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
+                 You can install apps by dragging and dropping <b>APK</b> or <b>OBB</b> files anywhere onto this window.
+               </p>
             </div>
 
             <div className="section-card" style={{ padding: "16px", flexShrink: 0 }}>

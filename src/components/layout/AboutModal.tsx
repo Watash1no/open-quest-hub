@@ -1,4 +1,5 @@
 import { X, Monitor, Package, ScrollText, FolderOpen, Wifi, Camera, Video, Cast, RefreshCw, ChevronRight } from "lucide-react";
+import logoLarge from "../../assets/logo-large.png";
 
 interface Props {
   open: boolean;
@@ -105,26 +106,24 @@ export function AboutModal({ open, onClose }: Props) {
           {/* Logo */}
           <div
             style={{
-              width: "48px",
-              height: "48px",
-              borderRadius: "12px",
-              background: "var(--color-accent)",
+              width: "56px",
+              height: "56px",
+              borderRadius: "14px",
+              overflow: "hidden",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: "24px",
-              fontWeight: 900,
-              color: "#fff",
               flexShrink: 0,
-              boxShadow: "0 4px 20px rgba(124,106,247,0.4)",
+              boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
+              border: "1px solid rgba(255,255,255,0.1)",
             }}
           >
-            Q
+            <img src={logoLarge} alt="Open Quest Hub" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </div>
 
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: "18px", color: "var(--color-text-primary)" }}>
-              OpenQuest Hub
+              Open Quest Hub
             </div>
             <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "2px" }}>
               Meta Quest & Android Device Manager
@@ -201,7 +200,7 @@ export function AboutModal({ open, onClose }: Props) {
               marginBottom: "20px",
             }}
           >
-            OpenQuest Hub is a desktop companion app for Meta Quest headsets and Android devices.
+            Open Quest Hub is a desktop companion app for Meta Quest headsets and Android devices.
             It gives you a powerful, all-in-one interface for managing apps, files, logs, and
             device controls — all without needing to touch the command line.
           </p>

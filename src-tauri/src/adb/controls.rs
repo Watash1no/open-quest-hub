@@ -42,7 +42,9 @@ pub async fn take_screenshot(app: tauri::AppHandle, device_id: String) -> Result
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let remote_path = format!("/sdcard/screenshot_{}.png", timestamp);
+    // Ensure directory exists
+    let _ = run_adb_device(&app, &device_id, &["shell", "mkdir", "-p", "/sdcard/Pictures/Screenshots"]).await;
+    let remote_path = format!("/sdcard/Pictures/Screenshots/screenshot_{}.png", timestamp);
     
     // 1. Capture on device
     run_adb_device(&app, &device_id, &["shell", "screencap", "-p", &remote_path]).await?;
@@ -70,7 +72,10 @@ pub async fn record_video(app: tauri::AppHandle, device_id: String, start: bool)
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let remote_path = format!("/sdcard/video_{}.mp4", timestamp);
+        let remote_path = format!("/sdcard/Movies/video_{}.mp4", timestamp);
+        
+        // Ensure directory exists
+        let _ = run_adb_device(&app, &device_id, &["shell", "mkdir", "-p", "/sdcard/Movies"]).await;
         
         // We run screenrecord in a separate thread/task so it doesn't block the UI
         let app_clone = app.clone();
@@ -184,14 +189,17 @@ pub async fn cast_device(
 
     let adb_path = crate::adb::find_adb(&app)?;
     
-    let child = Command::new("scrcpy")
+    let scrcpy_path = crate::adb::scrcpy_installer::get_scrcpy_path(&app)
+        .ok_or_else(|| AppError::CommandFailed("SCRCPY_NOT_FOUND".into()))?;
+    
+    let child = Command::new(scrcpy_path)
         .arg("-s")
         .arg(&device_id)
         .arg("--power-off-on-close")
         .env("ADB", adb_path) // Ensure scrcpy uses our adb
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| AppError::CommandFailed(format!("Failed to launch scrcpy. Please ensure it is installed and in your PATH. Error: {}", e)))?;
+        .map_err(|e| AppError::CommandFailed(format!("Failed to launch scrcpy. Error: {}", e)))?;
 
     processes.insert(device_id, child);
     Ok(())

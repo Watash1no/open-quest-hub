@@ -84,6 +84,7 @@ export function DevicesView() {
 
   // Derive WiFi on/off from current device's connection types
   const isWifi = selectedDevice?.connectionTypes.includes("WiFi") ?? false;
+  const isVrHeadset = selectedDevice && /quest|pico|vive|focus/i.test(selectedDevice.model);
 
 
   const handleRefresh = async () => {
@@ -315,7 +316,7 @@ export function DevicesView() {
             <div
               className="table-row"
               style={{
-                gridTemplateColumns: "24px 1fr 110px 90px 36px",
+                gridTemplateColumns: "24px 1fr 130px 80px 36px",
                 background: "rgba(255,255,255,0.02)",
                 color: "var(--color-text-secondary)",
                 fontSize: "11px",
@@ -402,9 +403,13 @@ export function DevicesView() {
                       addEvent({ kind: "cast", title: "Cast started", deviceModel: selectedDevice.model });
                     }
                   } catch (err) {
-                    toast.error(isCasting ? "Failed to stop cast" : "Failed to cast", { 
-                      description: "Make sure scrcpy is installed on your path." 
-                    });
+                    if (typeof err === "string" && err.includes("SCRCPY_NOT_FOUND")) {
+                      useAppStore.getState().setScrcpyInstallerOpen(true);
+                    } else {
+                      toast.error(isCasting ? "Failed to stop cast" : "Failed to cast", { 
+                        description: "Make sure scrcpy is installed on your path." 
+                      });
+                    }
                   }
                 },
                 status: isCasting ? "stop" : "start",
@@ -478,7 +483,7 @@ export function DevicesView() {
                 desc: "Quest guardian boundary system",
                 control: <Toggle checked={boundary} onChange={handleToggleBoundary} />
               },
-            ].map(({ id, icon, label, desc, action, status, btnLabel, control }: any) => (
+            ].filter(a => a.id !== "boundary" || isVrHeadset).map(({ id, icon, label, desc, action, status, btnLabel, control }: any) => (
               <div
                 key={id}
                 className="table-row"
@@ -724,7 +729,7 @@ function AppRow({ app, onLaunch, onStop, onUninstall }: {
   return (
     <div
       className="table-row"
-      style={{ gridTemplateColumns: "24px 1fr 110px 90px 36px", position: "relative" }}
+      style={{ gridTemplateColumns: "24px 1fr 130px 80px 36px", position: "relative" }}
     >
       <span
         className="status-dot"
@@ -734,13 +739,21 @@ function AppRow({ app, onLaunch, onStop, onUninstall }: {
           boxShadow: app.running ? "0 0 5px var(--color-success)" : "none",
         }}
       />
-      <div>
-        <div style={{ fontWeight: 500, fontSize: "13px" }}>{app.label || app.name}</div>
-        <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", fontFamily: "var(--font-mono)" }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 500, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{app.label || app.name}</div>
+        <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {app.name}
         </div>
       </div>
-      <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>{app.version || "Unknown"}</span>
+      <span style={{ 
+        fontSize: "12px", 
+        color: "var(--color-text-secondary)",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      }}>
+        {app.version || "Unknown"}
+      </span>
       <span
         style={{
           fontSize: "11px",

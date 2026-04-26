@@ -8,19 +8,24 @@ import type { Package } from "../types";
  * Hook for managing installed apps on the selected device.
  */
 export function useApps() {
-  const selectedDevice = useAppStore((s) => s.selectedSerial);
+  const devices = useAppStore((s) => s.devices);
+  const selectedSerial = useAppStore((s) => s.selectedSerial);
   const [packages, setPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Resolve the current ADB ID (serial or IP:Port) from the stable hardware serial
+  const device = devices.find(d => d.serial === selectedSerial);
+  const deviceId = device?.id || selectedSerial;
+
   const fetchPackages = useCallback(async (isPolling = false) => {
-    if (!selectedDevice) {
+    if (!deviceId) {
       setPackages([]);
       return;
     }
 
     if (!isPolling) setIsLoading(true);
     try {
-      const pkgs = await invoke<Package[]>("list_packages", { deviceId: selectedDevice });
+      const pkgs = await invoke<Package[]>("list_packages", { deviceId });
       
       // Strict sorting: 1. Running status, 2. Install date (newest first)
       const sorted = [...pkgs].sort((a, b) => {
@@ -39,11 +44,11 @@ export function useApps() {
     } finally {
       if (!isPolling) setIsLoading(false);
     }
-  }, [selectedDevice]);
+  }, [deviceId]);
 
   // Handle polling and initial fetch
   useEffect(() => {
-    if (!selectedDevice) {
+    if (!deviceId) {
       setPackages([]);
       return;
     }
@@ -69,14 +74,14 @@ export function useApps() {
       isMounted = false;
       window.clearTimeout(timeoutId);
     };
-  }, [selectedDevice, fetchPackages]);
+  }, [deviceId, fetchPackages]);
 
   const launchApp = async (packageName: string) => {
-    if (!selectedDevice) return;
+    if (!deviceId) return;
     try {
       // Optimistic update for "snappy" feel
       setPackages(prev => prev.map(p => p.name === packageName ? { ...p, running: true } : p));
-      await invoke("launch_app", { deviceId: selectedDevice, package: packageName });
+      await invoke("launch_app", { deviceId, package: packageName });
       toast.success("App launched");
     } catch (err) {
       // Revert if failed
@@ -86,11 +91,11 @@ export function useApps() {
   };
 
   const stopApp = async (packageName: string) => {
-    if (!selectedDevice) return;
+    if (!deviceId) return;
     try {
       // Optimistic update
       setPackages(prev => prev.map(p => p.name === packageName ? { ...p, running: false } : p));
-      await invoke("stop_app", { deviceId: selectedDevice, package: packageName });
+      await invoke("stop_app", { deviceId, package: packageName });
       toast.success("App stopped");
     } catch (err) {
       // Revert
@@ -100,9 +105,9 @@ export function useApps() {
   };
 
   const uninstallApp = async (packageName: string) => {
-    if (!selectedDevice) return;
+    if (!deviceId) return;
     try {
-      await invoke("uninstall_app", { deviceId: selectedDevice, package: packageName });
+      await invoke("uninstall_app", { deviceId, package: packageName });
       toast.success("App uninstalled");
       fetchPackages();
     } catch (err) {

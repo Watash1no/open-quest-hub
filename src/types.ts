@@ -10,6 +10,8 @@ export interface Device {
   model: string;
   androidVersion: string;
   batteryLevel: number | null;
+  controllerBatteryLeft: number | null;
+  controllerBatteryRight: number | null;
   connectionTypes: ConnectionType[];
   status: DeviceStatus;
 }

@@ -10,6 +10,8 @@ pub struct Device {
     pub model: String,           // ro.product.model
     pub android_version: String, // ro.build.version.release
     pub battery_level: i32,      // 0–100, -1 if unavailable
+    pub controller_battery_left: Option<i32>,
+    pub controller_battery_right: Option<i32>,
     pub connection_types: Vec<ConnectionType>,
     pub status: DeviceStatus,
 }

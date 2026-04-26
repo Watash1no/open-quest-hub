@@ -31,13 +31,13 @@ fn connection_type(serial: &str) -> ConnectionType {
 
 /// Fetch extra device info (model, android version, battery, and hardware serial).
 /// Uses a single shell command with semicolons to halve ADB round-trips from 4 → 1.
-async fn fetch_device_info(app: &AppHandle, id: &str) -> Result<(String, String, i32, String), AppError> {
-    // Run all 4 queries in one `adb shell` call separated by semicolons
+async fn fetch_device_info(app: &AppHandle, id: &str) -> Result<(String, String, i32, Option<i32>, Option<i32>, String), AppError> {
+    // Run all queries in one `adb shell` call, ignoring errors for individual commands
     let raw = run_adb_device(
         app,
         id,
         &["shell",
-          "echo MODEL:$(getprop ro.product.model);echo ANDROID:$(getprop ro.build.version.release);echo SERIAL:$(getprop ro.serialno);dumpsys battery | grep level:"],
+          "(echo MODEL:$(getprop ro.product.model)) 2>/dev/null; (echo ANDROID:$(getprop ro.build.version.release)) 2>/dev/null; (echo SERIAL:$(getprop ro.serialno)) 2>/dev/null; (dumpsys battery | grep level:) 2>/dev/null; (dumpsys OVRRemoteService | grep Paired) 2>/dev/null; (dumpsys pvr_service | grep -i battery) 2>/dev/null; true"],
     )
     .await?;
 
@@ -45,25 +45,67 @@ async fn fetch_device_info(app: &AppHandle, id: &str) -> Result<(String, String,
     let mut android_version = String::from("Unknown");
     let mut hardware_serial = String::new();
     let mut battery_level: i32 = -1;
+    let mut controller_left: Option<i32> = None;
+    let mut controller_right: Option<i32> = None;
 
     for line in raw.lines() {
         let line = line.trim();
+        let lower = line.to_lowercase();
+        
         if let Some(v) = line.strip_prefix("MODEL:") {
             if !v.is_empty() { model = v.to_string(); }
         } else if let Some(v) = line.strip_prefix("ANDROID:") {
             if !v.is_empty() { android_version = v.to_string(); }
         } else if let Some(v) = line.strip_prefix("SERIAL:") {
             if !v.is_empty() { hardware_serial = v.to_string(); }
-        } else if line.trim_start().starts_with("level:") {
-            if let Some(v) = line.split(':').nth(1) {
-                battery_level = v.trim().parse().unwrap_or(-1);
+        } else if lower.contains("level:") && !lower.contains("type:") && !lower.contains("paired") {
+            // Likely headset battery from dumpsys battery (e.g. "level: 80")
+            if let Some(val) = extract_battery_value(line) {
+                battery_level = val;
+            }
+        } else if lower.contains("battery:") || lower.contains("battery level:") || lower.contains("paired") {
+            // Robust parsing for various controller battery report formats
+            let is_left = lower.contains("left") || lower.contains("_l") || lower.contains(".l");
+            let is_right = lower.contains("right") || lower.contains("_r") || lower.contains(".r");
+            
+            if let Some(val) = extract_battery_value(line) {
+                if is_left { controller_left = Some(val); }
+                else if is_right { controller_right = Some(val); }
             }
         }
     }
 
     if hardware_serial.is_empty() { hardware_serial = id.to_string(); }
 
-    Ok((model, android_version, battery_level, hardware_serial))
+    Ok((model, android_version, battery_level, controller_left, controller_right, hardware_serial))
+}
+
+fn extract_battery_value(line: &str) -> Option<i32> {
+    let lower = line.to_lowercase();
+    
+    // Try to find a starting point: "battery:", "level:", "battery level:", etc.
+    let markers = ["battery level:", "battery:", "level:"];
+    let mut search_area = line;
+    
+    for marker in markers {
+        if let Some(idx) = lower.find(marker) {
+            search_area = &line[idx + marker.len()..];
+            break;
+        }
+    }
+    
+    // Split by common separators and find the first number in the identified area
+    for part in search_area.split(|c: char| !c.is_numeric()) {
+        let part = part.trim();
+        if !part.is_empty() {
+            if let Ok(val) = part.parse::<i32>() {
+                if (0..=100).contains(&val) {
+                    return Some(val);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Tauri command: list all connected ADB devices with metadata, merging USB and WiFi connections.
@@ -77,14 +119,26 @@ pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
             continue;
         };
 
+        let conn = connection_type(&id);
+
+        // Disconnect and ignore offline Wi-Fi devices
+        if status == DeviceStatus::Offline && conn == ConnectionType::WiFi {
+            let app_clone = app.clone();
+            let id_clone = id.clone();
+            tokio::spawn(async move {
+                let _ = run_adb(&app_clone, &["disconnect", &id_clone]).await;
+            });
+            continue;
+        }
+
         // Try to fetch info, fallback on error
-        let (model, android_version, battery_level, hardware_serial) = if status == DeviceStatus::Online {
+        let (model, android_version, battery_level, ctrl_l, ctrl_r, hardware_serial) = if status == DeviceStatus::Online {
             match fetch_device_info(&app, &id).await {
                 Ok(info) => info,
-                Err(_) => ("Unknown".into(), "Unknown".into(), -1, id.clone()),
+                Err(_) => ("Unknown".into(), "Unknown".into(), -1, None, None, id.clone()),
             }
         } else {
-            ("Unknown".into(), "Unknown".into(), -1, id.clone())
+            ("Unknown".into(), "Unknown".into(), -1, None, None, id.clone())
         };
 
         let conn = connection_type(&id);
@@ -114,6 +168,8 @@ pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
                 model,
                 android_version,
                 battery_level,
+                controller_battery_left: ctrl_l,
+                controller_battery_right: ctrl_r,
                 connection_types: vec![conn],
                 status,
             });

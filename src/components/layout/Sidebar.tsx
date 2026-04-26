@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useAppStore } from "../../store/useAppStore";
 import { NotificationsPanel } from "./NotificationsPanel";
 import { AboutModal } from "./AboutModal";
+import logo from "../../assets/logo.png";
 import type { ActiveView } from "../../types";
 
 // ── Nav item definition ──────────────────────────────────────────────────────
@@ -79,19 +80,15 @@ export function Sidebar() {
           width: "32px",
           height: "32px",
           borderRadius: "8px",
-          background: "var(--color-accent)",
+          overflow: "hidden",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           marginBottom: "16px",
-          fontSize: "16px",
-          fontWeight: 800,
-          color: "#fff",
-          letterSpacing: "-0.5px",
           flexShrink: 0,
         }}
       >
-        Q
+        <img src={logo} alt="Open Quest Hub" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
       </div>
 
       {/* Top nav icons */}

@@ -7,10 +7,12 @@ import {
   Wifi,
   Square,
   Smartphone,
+  Coffee,
 } from "lucide-react";
 import { VrHeadset } from "../icons/VrHeadset";
 import { useAppStore } from "../../store/useAppStore";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 
 // ── DeviceTopBar ─────────────────────────────────────────────────────────────
@@ -41,10 +43,14 @@ export function DeviceTopBar() {
         toast.success("Launching scrcpy...");
         addEvent({ kind: "cast", title: "Cast started", deviceModel: device.model });
       }
-    } catch {
-      toast.error(isCasting ? "Failed to stop cast" : "Failed to cast", {
-        description: "Make sure scrcpy is installed and in your PATH.",
-      });
+    } catch (err) {
+      if (typeof err === "string" && err.includes("SCRCPY_NOT_FOUND")) {
+        useAppStore.getState().setScrcpyInstallerOpen(true);
+      } else {
+        toast.error(isCasting ? "Failed to stop cast" : "Failed to cast", {
+          description: "Make sure scrcpy is installed and in your PATH.",
+        });
+      }
     }
   };
 
@@ -206,6 +212,18 @@ export function DeviceTopBar() {
 
       {/* Quick action buttons — now fully wired */}
       <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+        {/* Donate Button */}
+        <button
+          className="donate-btn"
+          onClick={() => openUrl("https://buymeacoffee.com/watash1no")}
+          title="Support the developer"
+        >
+          <Coffee size={14} strokeWidth={1.8} />
+          <span>Buy me a coffee</span>
+        </button>
+
+        <div style={{ width: "8px" }} /> {/* Divider spacing */}
+
         <button
           className="icon-btn"
           title={isCasting ? "Stop casting" : "Cast device (scrcpy)"}

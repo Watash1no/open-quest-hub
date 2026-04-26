@@ -1,4 +1,4 @@
-import { BatteryMedium, Usb, Wifi, Smartphone } from "lucide-react";
+import { BatteryMedium, Usb, Wifi, Smartphone, Gamepad2 } from "lucide-react";
 import { VrHeadset } from "../icons/VrHeadset";
 import type { Device } from "../../types";
 
@@ -174,23 +174,44 @@ export function DeviceCard({ device, isSelected, onSelect }: DeviceCardProps) {
         </div>
 
         {/* Battery */}
-        {device.batteryLevel !== null && (
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "3px",
-              fontSize: "11px",
-              color:
-                (device.batteryLevel ?? 100) < 20
-                  ? "var(--color-danger)"
-                  : "var(--color-text-secondary)",
-            }}
-          >
-            <BatteryMedium size={12} strokeWidth={1.8} />
-            {device.batteryLevel}%
-          </span>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          {device.batteryLevel !== null && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "3px",
+                fontSize: "11px",
+                color:
+                  (device.batteryLevel ?? 100) < 20
+                    ? "var(--color-danger)"
+                    : "var(--color-text-secondary)",
+              }}
+            >
+              <BatteryMedium size={12} strokeWidth={1.8} />
+              {device.batteryLevel}%
+            </span>
+          )}
+
+          {/* Controllers */}
+          {(device.controllerBatteryLeft !== null || device.controllerBatteryRight !== null) && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginLeft: "2px", paddingLeft: "8px", borderLeft: "1px solid rgba(255,255,255,0.1)" }}>
+              <Gamepad2 size={11} strokeWidth={1.8} color="var(--color-text-tertiary)" />
+              {device.controllerBatteryLeft !== null && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "2px", fontSize: "10px", color: "var(--color-text-secondary)" }}>
+                  <span style={{ opacity: 0.5, fontSize: "9px", fontWeight: 700 }}>L</span>
+                  {device.controllerBatteryLeft}%
+                </span>
+              )}
+              {device.controllerBatteryRight !== null && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "2px", fontSize: "10px", color: "var(--color-text-secondary)" }}>
+                  <span style={{ opacity: 0.5, fontSize: "9px", fontWeight: 700 }}>R</span>
+                  {device.controllerBatteryRight}%
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { X, Minus, Square } from "lucide-react";
+import logo from "../../assets/logo.png";
 
 const appWindow = getCurrentWindow();
 
@@ -21,9 +22,9 @@ export function TitleBar() {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "8px", pointerEvents: "none" }}>
-        <img src="/tauri.svg" style={{ width: "12px", height: "12px" }} alt="" />
+        <img src={logo} style={{ width: "14px", height: "14px", objectFit: "contain" }} alt="" />
         <span style={{ fontSize: "11px", fontWeight: 700, opacity: 0.5, letterSpacing: "0.02em", textTransform: "uppercase" }}>
-          OpenQuest Hub
+          Open Quest Hub
         </span>
       </div>
 

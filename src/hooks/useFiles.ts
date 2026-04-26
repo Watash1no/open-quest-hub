@@ -8,7 +8,8 @@ import { listen } from "@tauri-apps/api/event";
 import { load } from "@tauri-apps/plugin-store";
 
 export function useFiles() {
-  const selectedDevice = useAppStore((s) => s.selectedSerial);
+  const devices = useAppStore((s) => s.devices);
+  const selectedSerial = useAppStore((s) => s.selectedSerial);
   const currentPath = useAppStore((s) => s.currentPath);
   const setCurrentPath = useAppStore((s) => s.setCurrentPath);
   const files = useAppStore((s) => s.files);
@@ -20,12 +21,16 @@ export function useFiles() {
   const settings = useAppStore((s) => s.settings);
   const setSettings = useAppStore((s) => s.setSettings);
 
+  // Resolve the current ADB ID (serial or IP:Port) from the stable hardware serial
+  const device = devices.find(d => d.serial === selectedSerial);
+  const deviceId = device?.id || selectedSerial;
+
   const fetchFiles = useCallback(async (path: string) => {
-    if (!selectedDevice) return;
+    if (!deviceId) return;
     const { setIsLoading } = useAppStore.getState();
     setIsLoading(true);
     try {
-      const entries = await invoke<FileEntry[]>("list_files", { deviceId: selectedDevice, path });
+      const entries = await invoke<FileEntry[]>("list_files", { deviceId, path });
       setFiles(entries);
       setCurrentPath(path);
     } catch (err) {
@@ -34,13 +39,13 @@ export function useFiles() {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedDevice, setFiles, setCurrentPath, setIsLoading]);
+  }, [deviceId, setFiles, setCurrentPath, setIsLoading]);
 
   useEffect(() => {
-    if (selectedDevice) {
+    if (deviceId) {
       fetchFiles(currentPath);
     }
-  }, [selectedDevice, currentPath, fetchFiles]);
+  }, [deviceId, currentPath, fetchFiles]);
 
   useEffect(() => {
     const unlisten = listen("file-transfer-progress", (event: any) => {
@@ -77,16 +82,12 @@ export function useFiles() {
 
   /**
    * Pick or reuse the persistent download directory.
-   * On first use, opens a folder picker and saves the choice to settings.
-   * Returns the chosen directory path, or null if cancelled.
    */
   const pickOrGetDownloadDir = async (): Promise<string | null> => {
-    // Reuse saved dir if already set
     if (settings.downloadDir && settings.downloadDir.trim() !== "") {
       return settings.downloadDir;
     }
 
-    // First time — prompt folder picker (works cross-platform via Tauri dialog)
     const chosen = await open({
       directory: true,
       multiple: false,
@@ -96,7 +97,6 @@ export function useFiles() {
     if (!chosen) return null;
     const chosenStr = typeof chosen === "string" ? chosen : chosen[0];
 
-    // Persist using the same store key that useSettings reads ("settings" object)
     setSettings({ downloadDir: chosenStr });
     try {
       const store = await load("settings.json");
@@ -109,20 +109,16 @@ export function useFiles() {
     return chosenStr;
   };
 
-  /**
-   * Download a single file to the persistent download folder.
-   */
   const downloadFile = async (entry: FileEntry) => {
-    if (!selectedDevice) return;
+    if (!deviceId) return;
     try {
       const dir = await pickOrGetDownloadDir();
       if (!dir) return;
 
-      // Build local path: dir + / + filename (cross-platform via Rust)
       const localPath = await invoke<string>("join_path", { dir, filename: entry.name });
 
       await invoke("pull_file", {
-        deviceId: selectedDevice,
+        deviceId,
         remotePath: entry.path,
         localPath,
       });
@@ -133,11 +129,8 @@ export function useFiles() {
     }
   };
 
-  /**
-   * Download multiple selected files to the persistent download folder.
-   */
   const downloadFiles = async (entries: FileEntry[]) => {
-    if (!selectedDevice || entries.length === 0) return;
+    if (!deviceId || entries.length === 0) return;
     try {
       const dir = await pickOrGetDownloadDir();
       if (!dir) return;
@@ -155,7 +148,7 @@ export function useFiles() {
         try {
           const localPath = await invoke<string>("join_path", { dir, filename: entry.name });
           await invoke("pull_file", {
-            deviceId: selectedDevice,
+            deviceId,
             remotePath: entry.path,
             localPath,
           });

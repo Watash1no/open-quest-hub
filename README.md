@@ -8,11 +8,13 @@
 ## ✨ Key Features
 
 - **📱 Device Management:** Real-time polling of connected devices with status indicators (Online, Unauthorized, Offline).
+- **📺 Screen Casting:** Real-time low-latency screen mirroring of your VR headset using built-in Scrcpy integration.
 - **📦 App Explorer:** Browse, uninstall, and launch installed applications. Sideload APKs with a simple drag-and-drop.
-- **📁 File Explorer:** Full access to device storage (`/sdcard`). Download files to your PC with real-time transfer progress.
-- **📟 Powerful Logcat:** High-performance log streaming with custom argument support (e.g., `-s unity`), filtering, and pausing.
-- **⚙️ Deep Configuration:** Bundled ADB for plug-and-play ease, with persistent settings for custom ADB paths, polling intervals, and log buffer limits.
-- **🎨 Premium UI:** Frameless design with a custom titlebar, skeleton loaders, and smooth view transitions.
+- **📁 File Explorer:** Full access to device storage (`/sdcard`). Download files to your PC with real-time transfer progress and date-based sorting.
+- **📟 Powerful Logcat:** High-performance log streaming with custom argument support, filtering, and the ability to export logs to a file.
+- **🛡️ VR Settings:** Quick access to headset-specific settings like Boundary (Guardian) toggling and device-specific configurations.
+- **⚙️ Deep Configuration:** Automated utility installation (Scrcpy, ADB), persistent settings for custom paths, and log buffer management.
+- **🎨 Premium UI:** Modern, frameless design with custom animations, glassmorphism effects, and smooth view transitions.
 
 ---
 
@@ -21,7 +23,31 @@
 - **Frontend:** [React 19](https://react.dev/), [Typescript](https://www.typescriptlang.org/), [Zustand](https://github.com/pmndrs/zustand) (State), [Lucide React](https://lucide.dev/) (Icons).
 - **Backend:** [Rust](https://www.rust-lang.org/) (Core logic & ADB interaction).
 - **Framework:** [Tauri v2](https://tauri.app/) (Lightweight desktop bridge).
-- **Styling:** Vanilla CSS 3 with custom design tokens.
+- **Styling:** [Tailwind CSS 4](https://tailwindcss.com/) with modern design principles.
+
+---
+
+## 📱 Device Setup
+
+To ensure **OpenQuest Hub** works correctly, your device must be properly configured.
+
+### 🥽 Meta Quest Specific Setup
+1.  **Create a Developer Organization:**
+    - Go to [dashboard.oculus.com](https://dashboard.oculus.com/) and log in with your Meta account.
+    - Create a "New Organization" (give it any name).
+    - You may need to verify your account with a phone number or credit card.
+2.  **Enable Developer Mode in the Mobile App:**
+    - Open the **Meta Quest app** on your smartphone.
+    - Go to **Menu > Devices** and select your headset.
+    - Tap **Headset Settings > Developer Mode**.
+    - Toggle the switch to **ON**.
+3.  **Enable USB Debugging in the Headset:**
+    - Connect the headset to your PC via USB.
+    - Put on the headset and select **"Allow USB Debugging"** when the prompt appears (check "Always allow from this computer").
+
+### 📱 Generic Android Device Setup
+1.  **Enable Developer Options:** Go to **Settings > System > About** and tap **Build Number** 7 times.
+2.  **Toggle Developer Mode:** Go to the newly appeared **Developer Options** menu and ensure **Developer Mode** and **USB Debugging** are turned **ON**.
 
 ---
 
@@ -33,16 +59,20 @@
 
 ### Installation
 
-#### Linux (Debian/Ubuntu)
-1. Download the `.deb` package from the [Releases](https://github.com/Watash1no/openquest_project/releases) page.
-2. Install via terminal:
-   ```bash
-   sudo dpkg -i openquest-hub_*.deb
-   ```
+#### macOS
+1. Download the `.dmg` from the [Releases](https://github.com/Watash1no/openquest_project/releases) page.
+2. Open the `.dmg` and drag **Open Quest Hub** to your **Applications** folder.
 
 #### Windows
 1. Download the `.exe` or `.msi` from the latest release.
 2. Run the installer and follow the prompts.
+
+#### Linux (Debian/Ubuntu)
+1. Download the `.deb` package from the latest release.
+2. Install via terminal:
+   ```bash
+   sudo dpkg -i openquest-hub_*.deb
+   ```
 
 ---
 

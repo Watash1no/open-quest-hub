@@ -13,6 +13,8 @@ use adb::files::{list_files, pull_file, join_path, save_setting, write_text_file
 use adb::controls::{toggle_boundary, enable_wifi_adb, disable_wifi_adb, take_screenshot, record_video, cast_device, stop_casting, get_device_ip, connect_device_ip, setup_wireless_adb, list_remote_media, delete_remote_media, open_remote_media};
 
 
+use adb::scrcpy_installer::install_scrcpy;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -22,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            install_scrcpy,
             list_devices,
             list_packages,
             uninstall_app,

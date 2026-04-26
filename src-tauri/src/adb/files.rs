@@ -28,7 +28,7 @@ pub async fn list_files_with_args(app: AppHandle, device_id: String, path: Strin
 
     let raw = match run_adb_device(&app, &device_id, &args).await {
         Ok(out) => out,
-        Err(AppError::CommandFailed(err)) if err.contains("Permission denied") => {
+        Err(AppError::CommandFailed(err)) if err.contains("Permission denied") || err.contains("No such file or directory") => {
             return Ok(Vec::new());
         }
         Err(e) => return Err(e),

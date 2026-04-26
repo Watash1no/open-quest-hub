@@ -17,6 +17,7 @@ import { useSettings } from "./hooks/useSettings";
 import { useDevices } from "./hooks/useDevices";
 import { SetupModal } from "./components/layout/SetupModal";
 import { InstallProgressOverlay } from "./components/layout/InstallProgressOverlay";
+import { ScrcpyInstallerModal } from "./components/shared/ScrcpyInstallerModal";
 
 import { useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -253,6 +254,7 @@ function App() {
         }}
       />
       <SetupModal />
+      <ScrcpyInstallerModal />
       <InstallProgressOverlay />
 
       {/* ── Global Drag & Drop Overlay ── */}
