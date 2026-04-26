@@ -1,3 +1,4 @@
+#[cfg(target_os = "windows")]
 use tauri::Manager;
 use crate::error::AppError;
 
