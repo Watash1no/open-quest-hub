@@ -109,8 +109,8 @@ pub fn find_adb<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, AppError> {
     which(&adb_name).map_err(|_| AppError::AdbNotFound)
 }
 
-/// Run an adb command and return captured stdout as a String.
-pub async fn run_adb<R: Runtime>(app: &AppHandle<R>, args: &[&str]) -> Result<String, AppError> {
+/// Run an adb command and return captured stdout as a String with a custom timeout.
+pub async fn run_adb_with_timeout<R: Runtime>(app: &AppHandle<R>, args: &[&str], timeout: std::time::Duration) -> Result<String, AppError> {
     let adb = find_adb(app)?;
     let mut cmd = Command::new(&adb);
     cmd.args(args);
@@ -120,9 +120,9 @@ pub async fn run_adb<R: Runtime>(app: &AppHandle<R>, args: &[&str]) -> Result<St
         cmd.as_std_mut().creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
-    let output = match tokio::time::timeout(std::time::Duration::from_secs(5), cmd.output()).await {
+    let output = match tokio::time::timeout(timeout, cmd.output()).await {
         Ok(res) => res?,
-        Err(_) => return Err(AppError::CommandFailed("ADB command timed out after 5 seconds".into())),
+        Err(_) => return Err(AppError::CommandFailed(format!("ADB command timed out after {} seconds", timeout.as_secs()))),
     };
 
     if output.status.success() {
@@ -131,6 +131,11 @@ pub async fn run_adb<R: Runtime>(app: &AppHandle<R>, args: &[&str]) -> Result<St
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         Err(AppError::CommandFailed(stderr))
     }
+}
+
+/// Run an adb command and return captured stdout as a String (default 5s timeout).
+pub async fn run_adb<R: Runtime>(app: &AppHandle<R>, args: &[&str]) -> Result<String, AppError> {
+    run_adb_with_timeout(app, args, std::time::Duration::from_secs(5)).await
 }
 
 /// Run an adb command WITHOUT a timeout — for long-running operations like `adb install` or `adb push`.
@@ -159,6 +164,13 @@ pub async fn run_adb_device_no_timeout<R: Runtime>(app: &AppHandle<R>, device_id
     let mut full_args: Vec<&str> = vec!["-s", device_id];
     full_args.extend_from_slice(args);
     run_adb_no_timeout(app, &full_args).await
+}
+
+/// Run an adb command targeting a specific device serial with a custom timeout.
+pub async fn run_adb_device_with_timeout<R: Runtime>(app: &AppHandle<R>, device_id: &str, args: &[&str], timeout: std::time::Duration) -> Result<String, AppError> {
+    let mut full_args: Vec<&str> = vec!["-s", device_id];
+    full_args.extend_from_slice(args);
+    run_adb_with_timeout(app, &full_args, timeout).await
 }
 
 /// Run an adb command targeting a specific device serial.

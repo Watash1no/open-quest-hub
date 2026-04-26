@@ -1,10 +1,10 @@
 use tauri::AppHandle;
-use crate::adb::{run_adb, run_adb_device, find_adb};
+use crate::adb::{run_adb, run_adb_device, find_adb, run_adb_device_with_timeout};
 use crate::error::AppError;
 use crate::models::{ConnectionType, Device, DeviceStatus};
 
 /// Parse a single line from `adb devices -l` output.
-fn parse_device_line(line: &str) -> Option<(String, DeviceStatus)> {
+fn parse_device_line(line: &str) -> Option<(String, DeviceStatus, Option<String>)> {
     let line = line.trim();
     if line.is_empty() || line.starts_with("List of devices") {
         return None;
@@ -12,12 +12,21 @@ fn parse_device_line(line: &str) -> Option<(String, DeviceStatus)> {
     
     // Standard adb devices -l line:
     // [serial] [status] [extra info...]
-    // e.g. "2G0YC6LF6000GG device product:eureka ..."
+    // e.g. "2G0YC6LF6000GG device product:eureka model:Quest_3 device:eureka transport_id:1"
     let mut words = line.split_whitespace();
     let serial = words.next()?.to_string();
     let status_word = words.next()?;
+    let status = DeviceStatus::from_adb_str(status_word);
+
+    let mut model = None;
+    for word in words {
+        if let Some(m) = word.strip_prefix("model:") {
+            model = Some(m.to_string());
+            break;
+        }
+    }
     
-    Some((serial, DeviceStatus::from_adb_str(status_word)))
+    Some((serial, status, model))
 }
 
 /// Detect if device is connected via WiFi (serial contains a colon, e.g. "192.168.x.x:5555").
@@ -32,12 +41,14 @@ fn connection_type(serial: &str) -> ConnectionType {
 /// Fetch extra device info (model, android version, battery, and hardware serial).
 /// Uses a single shell command with semicolons to halve ADB round-trips from 4 → 1.
 async fn fetch_device_info(app: &AppHandle, id: &str) -> Result<(String, String, i32, Option<i32>, Option<i32>, String), AppError> {
-    // Run all queries in one `adb shell` call, ignoring errors for individual commands
-    let raw = run_adb_device(
+    // Run all queries in one `adb shell` call, ignoring errors for individual commands.
+    // Reduced timeout to 2 seconds to avoid blocking the UI if a device is sluggish.
+    let raw = run_adb_device_with_timeout(
         app,
         id,
         &["shell",
           "(echo MODEL:$(getprop ro.product.model)) 2>/dev/null; (echo ANDROID:$(getprop ro.build.version.release)) 2>/dev/null; (echo SERIAL:$(getprop ro.serialno)) 2>/dev/null; (dumpsys battery | grep level:) 2>/dev/null; (dumpsys OVRRemoteService | grep Paired) 2>/dev/null; (dumpsys pvr_service | grep -i battery) 2>/dev/null; true"],
+        std::time::Duration::from_secs(2),
     )
     .await?;
 
@@ -112,13 +123,33 @@ fn extract_battery_value(line: &str) -> Option<i32> {
 #[tauri::command]
 pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
     let output = run_adb(&app, &["devices", "-l"]).await?;
-    let mut devices_map: std::collections::HashMap<String, Device> = std::collections::HashMap::new();
+    let mut basic_devices = Vec::new();
 
     for line in output.lines() {
-        let Some((id, status)) = parse_device_line(line) else {
-            continue;
-        };
+        if let Some((id, status, model_from_l)) = parse_device_line(line) {
+            basic_devices.push((id, status, model_from_l));
+        }
+    }
 
+    // Parallelize info fetching for all Online devices
+    let mut futures = Vec::new();
+    for (id, status, _) in &basic_devices {
+        if *status == DeviceStatus::Online {
+            let app_clone = app.clone();
+            let id_clone = id.clone();
+            futures.push(async move {
+                let info = fetch_device_info(&app_clone, &id_clone).await;
+                (id_clone, info)
+            });
+        }
+    }
+
+    let info_results: std::collections::HashMap<String, Result<(String, String, i32, Option<i32>, Option<i32>, String), AppError>> = 
+        futures_util::future::join_all(futures).await.into_iter().collect();
+
+    let mut devices_map: std::collections::HashMap<String, Device> = std::collections::HashMap::new();
+
+    for (id, status, model_from_l) in basic_devices {
         let conn = connection_type(&id);
 
         // Disconnect and ignore offline Wi-Fi devices
@@ -131,24 +162,23 @@ pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
             continue;
         }
 
-        // Try to fetch info, fallback on error
+        // Try to fetch info, fallback to model from 'adb devices -l' if shell fails or times out
         let (model, android_version, battery_level, ctrl_l, ctrl_r, hardware_serial) = if status == DeviceStatus::Online {
-            match fetch_device_info(&app, &id).await {
-                Ok(info) => info,
-                Err(_) => ("Unknown".into(), "Unknown".into(), -1, None, None, id.clone()),
+            match info_results.get(&id) {
+                Some(Ok(info)) => info.clone(),
+                _ => (
+                    model_from_l.unwrap_or_else(|| "Unknown".into()),
+                    "Unknown".into(),
+                    -1,
+                    None,
+                    None,
+                    id.clone()
+                ),
             }
         } else {
-            ("Unknown".into(), "Unknown".into(), -1, None, None, id.clone())
+            (model_from_l.unwrap_or_else(|| "Unknown".into()), "Unknown".into(), -1, None, None, id.clone())
         };
 
-        let conn = connection_type(&id);
-
-        // Deduplication Logic:
-        // We use hardware_serial (ro.serialno) as the key if available.
-        // If info failed (Offline/Unauthorized), we use the ID.
-        // BUT if it's a WiFi ID (IP), we try to see if any Online device has a matching model/serial? 
-        // Actually, let's stick to hardware_serial but add a secondary lookup.
-        
         let mut merged = false;
         
         // 1. Exact match on hardware_serial
@@ -156,10 +186,6 @@ pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
             merge_device(existing, id.clone(), conn, status);
             merged = true;
         } 
-        
-        // 2. If it's a WiFi IP and we couldn't get a serial, check if any existing device
-        // is Online and NOT yet WiFi-enabled? (Too aggressive?)
-        // Let's just rely on hardware_serial for now, but ensure we update the map correctly.
         
         if !merged {
             devices_map.insert(hardware_serial.clone(), Device {
