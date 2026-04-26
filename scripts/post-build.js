@@ -7,8 +7,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 
 const platform = process.platform;
-const productName = 'openquest-hub';
-let binaryName = productName;
+const productName = 'Open Quest Hub';
+let binaryName = 'openquest-hub'; // The internal binary name from Cargo.toml
 
 if (platform === 'win32') {
   binaryName += '.exe';
