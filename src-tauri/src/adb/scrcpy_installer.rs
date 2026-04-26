@@ -1,6 +1,8 @@
 use crate::error::AppError;
+use tauri::Manager;
 
-pub fn get_scrcpy_path(_app: &tauri::AppHandle) -> Option<String> {
+
+pub fn get_scrcpy_path(app: &tauri::AppHandle) -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         if let Ok(path) = app.path().app_local_data_dir() {
@@ -24,6 +26,18 @@ pub fn get_scrcpy_path(_app: &tauri::AppHandle) -> Option<String> {
             return Some("/usr/local/bin/scrcpy".to_string());
         }
     }
+    
+    #[cfg(target_os = "linux")]
+    {
+        if std::path::Path::new("/usr/bin/scrcpy").exists() {
+            return Some("/usr/bin/scrcpy".to_string());
+        }
+        if std::path::Path::new("/snap/bin/scrcpy").exists() {
+            return Some("/snap/bin/scrcpy".to_string());
+        }
+    }
+
+
 
     None
 }
@@ -69,8 +83,9 @@ async fn install_scrcpy_windows(app: &tauri::AppHandle) -> Result<String, AppErr
     let target_dir = scrcpy_dir.clone();
     
     tokio::task::spawn_blocking(move || {
-        let mut cursor = Cursor::new(bytes);
-        zip_extract::extract(&mut cursor, &target_dir, true)
+        let cursor = Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|e| AppError::CommandFailed(e.to_string()))?;
+        archive.extract_unwrapped_root_dir(&target_dir, zip::read::root_dir_common_filter).map_err(|e| AppError::CommandFailed(e.to_string()))
     }).await
       .map_err(|e| AppError::CommandFailed(e.to_string()))?
       .map_err(|e| AppError::CommandFailed(e.to_string()))?;
@@ -114,8 +129,9 @@ async fn install_scrcpy_linux(_app: &tauri::AppHandle) -> Result<String, AppErro
         
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::CommandFailed(format!("Installation failed: {}. Please run 'sudo apt install scrcpy' manually.", err)));
+        return Err(AppError::CommandFailed(format!("Installation failed: {}. Please try 'sudo apt install scrcpy' or 'sudo snap install scrcpy' manually.", err)));
     }
+
     
     Ok("Installed successfully".to_string())
 }

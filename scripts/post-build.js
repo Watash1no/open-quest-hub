@@ -39,7 +39,7 @@ async function run() {
 
   if (!primarySrc) {
     primarySrc = path.join(root, 'src-tauri', 'target', 'release', binaryName);
-    primaryDest = path.join(destDir, binaryName);
+    primaryDest = path.join(destDir, `${productName}${platform === 'win32' ? '.exe' : ''}`);
   }
 
   if (fs.existsSync(primarySrc)) {

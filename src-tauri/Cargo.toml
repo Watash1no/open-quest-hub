@@ -28,5 +28,5 @@ tokio             = { version = "1", features = ["full"] }
 which             = "7"
 thiserror         = "2"
 reqwest = { version = "0.13.2", features = ["stream"] }
-zip-extract = "0.4.1"
+zip = "2.2.2"
 futures-util = "0.3.32"
