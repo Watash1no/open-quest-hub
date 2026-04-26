@@ -174,7 +174,7 @@ function App() {
             };
           });
           
-          if (status === "done" && useAppStore.getState().installProgress.files.every(f => f.status === "done")) {
+          if (status === "done" && !filename && useAppStore.getState().installProgress.files.every(f => f.status === "done")) {
             toast.success("Installation complete!");
             const prog = useAppStore.getState().installProgress;
             useAppStore.getState().addEvent({
