@@ -269,22 +269,9 @@ export function AboutModal({ open, onClose }: Props) {
             }}
           >
             <ChevronRight size={13} />
-            <span>Changelog & release notes — coming soon</span>
+            <span>Version 1.0.0</span>
           </div>
 
-          <div
-            style={{
-              marginTop: "24px",
-              paddingTop: "16px",
-              borderTop: "1px dashed var(--color-surface-border)",
-              textAlign: "center",
-              fontSize: "13px",
-              color: "var(--color-text-secondary)",
-              fontWeight: 500
-            }}
-          >
-            Это версия 1.0.0
-          </div>
         </div>
 
         {/* Footer */}
@@ -301,7 +288,7 @@ export function AboutModal({ open, onClose }: Props) {
         >
           <span>Built with Tauri + React</span>
           {/* TODO: Add GitHub link when repo is public */}
-          <span style={{ opacity: 0.5 }}>Open Source — coming soon</span>
+          <span style={{ opacity: 0.5 }}>Open Source</span>
         </div>
       </div>
     </>

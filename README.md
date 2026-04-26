@@ -60,8 +60,9 @@ To ensure **OpenQuest Hub** works correctly, your device must be properly config
 ### Installation
 
 #### macOS
-1. Download the `.dmg` from the [Releases](https://github.com/Watash1no/openquest_project/releases) page.
+1. Download the `.dmg` from the [Releases](https://github.com/Watash1no/open-quest-hub/releases) page.
 2. Open the `.dmg` and drag **Open Quest Hub** to your **Applications** folder.
+3. See [First Launch](#-macos-1) below for instructions on how to bypass security warnings.
 
 #### Windows
 1. Download the `.exe` or `.msi` from the latest release.
@@ -82,8 +83,8 @@ If you want to build the project from source:
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/Watash1no/openquest_project.git
-   cd openquest_project
+   git clone https://github.com/Watash1no/open-quest-hub.git
+   cd open-quest-hub
    ```
 
 2. **Install dependencies:**
@@ -118,9 +119,21 @@ Contributions are welcome! Please open an issue or submit a pull request for any
 Since the application is currently not signed with official developer certificates, you might see security warnings on your first launch. This is normal for early-stage open-source projects.
 
 ### 🍎 macOS
-1. Download the `.dmg` from the [Releases](https://github.com/Watash1no/openquest_project/releases) page.
-2. Drag **Open Quest Hub** to your **Applications** folder.
-3. **Important:** To launch for the first time, **Right-click** the app icon and select **Open**. When the warning dialog appears, click **Open** again.
+1. Download the `.dmg` and drag **Open Quest Hub** to your **Applications** folder.
+2. **First Launch:** Since the app is not signed, macOS will block it with a "could not verify" message.
+3. **How to bypass:**
+   - **Option A (System Settings):**
+     1. Try to open the app (it will fail).
+     2. Open **System Settings** > **Privacy & Security**.
+     3. Scroll down to the **Security** section.
+     4. Click **Open Anyway** next to the "Open Quest Hub was blocked" message.
+     5. Enter your password and click **Open** in the final dialog.
+   - **Option B (Terminal):**
+     1. Open **Terminal** and run:
+        ```bash
+        sudo xattr -rd com.apple.quarantine /Applications/Open\ Quest\ Hub.app
+        ```
+     2. Now the app will open with a normal double-click.
 
 ### 🪟 Windows
 1. Download the `.exe` or `.msi` from the latest release.
@@ -148,7 +161,7 @@ Since the application is currently not signed with official developer certificat
 ---
 
 <div align="center">
-  <a href="https://buymeacoffee.com/watash1no"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee" /></a><a href="LICENSE"><img src="https://img.shields.io/github/license/Watash1no/openquest_project?style=for-the-badge" alt="License" /></a>
+  <a href="https://buymeacoffee.com/watash1no"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee" /></a><a href="LICENSE"><img src="https://img.shields.io/github/license/Watash1no/open-quest-hub?style=for-the-badge" alt="License" /></a>
 </div>
 
 
