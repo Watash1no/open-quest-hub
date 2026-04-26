@@ -729,7 +729,11 @@ function AppRow({ app, onLaunch, onStop, onUninstall }: {
   return (
     <div
       className="table-row"
-      style={{ gridTemplateColumns: "24px 1fr 130px 80px 36px", position: "relative" }}
+      style={{ 
+        gridTemplateColumns: "24px 1fr 130px 80px 36px", 
+        position: "relative",
+        zIndex: showMenu ? 10 : 1 
+      }}
     >
       <span
         className="status-dot"
@@ -771,23 +775,11 @@ function AppRow({ app, onLaunch, onStop, onUninstall }: {
           <div 
             ref={menuRef}
             className="dropdown-menu"
-            style={{ 
-               position: "absolute", 
-               right: 0, 
-               top: "100%", 
-               zIndex: 100,
-               background: "var(--color-surface)",
-               border: "1px solid var(--color-surface-border)",
-               borderRadius: "8px",
-               padding: "4px",
-               minWidth: "140px",
-               boxShadow: "0 10px 25px rgba(0,0,0,0.5)"
-            }}
           >
             <MenuBtn icon={<Play size={12}/>} label="Launch" onClick={() => { onLaunch(); setShowMenu(false); }} />
             <MenuBtn icon={<Square size={12}/>} label="Stop" onClick={() => { onStop(); setShowMenu(false); }} disabled={!app.running} />
-            <div style={{ height: "1px", background: "var(--color-surface-border)", margin: "4px 0" }} />
-            <MenuBtn icon={<Trash2 size={12}/>} label="Uninstall" onClick={() => { onUninstall(); setShowMenu(false); }} color="var(--color-error)" />
+            <div className="dropdown-divider" />
+            <MenuBtn icon={<Trash2 size={12}/>} label="Uninstall" onClick={() => { onUninstall(); setShowMenu(false); }} isDanger />
           </div>
         )}
       </div>
@@ -795,29 +787,15 @@ function AppRow({ app, onLaunch, onStop, onUninstall }: {
   );
 }
 
-function MenuBtn({ icon, label, onClick, color, disabled }: { icon: any, label: string, onClick: () => void, color?: string, disabled?: boolean }) {
+function MenuBtn({ icon, label, onClick, isDanger, disabled }: { icon: any, label: string, onClick: () => void, isDanger?: boolean, disabled?: boolean }) {
   return (
     <button 
-      className="menu-btn" 
+      className={`menu-item ${isDanger ? 'danger' : ''}`}
       onClick={onClick}
       disabled={disabled}
-      style={{ 
-        display: "flex", 
-        alignItems: "center", 
-        gap: "8px", 
-        width: "100%", 
-        padding: "6px 12px", 
-        border: "none", 
-        background: "transparent", 
-        color: color || "var(--color-text-primary)", 
-        fontSize: "12px", 
-        borderRadius: "4px",
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.5 : 1
-      }}
     >
-      {icon}
-      {label}
+      <span style={{ display: 'flex', opacity: 0.7 }}>{icon}</span>
+      <span>{label}</span>
     </button>
   );
 }
