@@ -31,8 +31,8 @@ export function FileExplorer({
   const pathParts = currentPath.split("/").filter(Boolean);
 
   // ── Sort state ────────────────────────────────────────────────────────────
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [sortKey, setSortKey] = useState<SortKey>("modified");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const handleHeaderClick = (key: SortKey) => {
     if (sortKey === key) {
@@ -278,7 +278,9 @@ export function FileExplorer({
           >
             <span />
             <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "var(--color-accent)" }}>
-              <ArrowUp size={18} />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "20px", flexShrink: 0 }}>
+                <ArrowUp size={18} />
+              </div>
               <span style={{ fontWeight: 500 }}>..</span>
             </div>
             <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>--</span>
@@ -338,7 +340,9 @@ export function FileExplorer({
                   style={{ display: "flex", alignItems: "center", gap: "10px", overflow: "hidden", cursor: file.isDir ? "pointer" : "default" }}
                   onClick={() => file.isDir && handleNavigate(file.path)}
                 >
-                  {getFileIcon(file)}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "20px", flexShrink: 0 }}>
+                    {getFileIcon(file)}
+                  </div>
                   <span style={{ fontWeight: 500, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {file.name}
                   </span>

@@ -17,13 +17,17 @@ import {
   LayoutGrid,
   RefreshCcw,
   X,
+  Download,
+  FileVideo,
+  FileImage,
 } from "lucide-react";
 import { useAppStore } from "../store/useAppStore";
 import { DeviceCard } from "../components/devices/DeviceCard";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useApps } from "../hooks/useApps";
-import type { Device, Package } from "../types";
+import { useFiles } from "../hooks/useFiles";
+import type { Device, Package, FileEntry } from "../types";
 
 // ── Toggle switch helper ─────────────────────────────────────────────────────
 function Toggle({
@@ -65,6 +69,8 @@ export function DevicesView() {
     uninstallApp, 
     refresh: refreshApps 
   } = useApps();
+
+  const { downloadFile } = useFiles();
   
   const selectedDevice: Device | null = devices.find((d) => d.serial === selectedSerial) ?? devices[0] ?? null;
 
@@ -74,7 +80,7 @@ export function DevicesView() {
   const [wifiToggling, setWifiToggling] = useState(false);
   const isCasting = useAppStore((s) => s.isCasting);
   const setIsCasting = useAppStore((s) => s.setIsCasting);
-  const [remoteMedia, setRemoteMedia] = useState<string[]>([]);
+  const [remoteMedia, setRemoteMedia] = useState<FileEntry[]>([]);
 
   // Derive WiFi on/off from current device's connection types
   const isWifi = selectedDevice?.connectionTypes.includes("WiFi") ?? false;
@@ -112,7 +118,8 @@ export function DevicesView() {
       toast.success("Screenshot saved", { description: path });
       addEvent({ kind: "screenshot", title: "Screenshot captured", detail: path.split(/[\\/]/).pop(), deviceModel: selectedDevice.model });
       // Refresh gallery
-      const list = await invoke<string[]>("list_remote_media", { deviceId: selectedDevice.id });
+      // Refresh gallery
+      const list = await invoke<FileEntry[]>("list_remote_media", { deviceId: selectedDevice.id });
       setRemoteMedia(list);
     } catch (err) {
       toast.error("Screenshot failed");
@@ -129,7 +136,7 @@ export function DevicesView() {
       toast.success(starting ? "Recording started" : "Recording stopped");
       addEvent({ kind: "record", title: starting ? "Recording started" : "Recording stopped", deviceModel: selectedDevice.model });
       if (!starting) {
-        const list = await invoke<string[]>("list_remote_media", { deviceId: selectedDevice.id });
+        const list = await invoke<FileEntry[]>("list_remote_media", { deviceId: selectedDevice.id });
         setRemoteMedia(list);
       }
     } catch (err) {
@@ -141,7 +148,7 @@ export function DevicesView() {
 
   useEffect(() => {
     if (selectedDevice) {
-      invoke<string[]>("list_remote_media", { deviceId: selectedDevice.id })
+      invoke<FileEntry[]>("list_remote_media", { deviceId: selectedDevice.id })
         .then(setRemoteMedia)
         .catch(() => setRemoteMedia([]));
     } else {
@@ -464,6 +471,13 @@ export function DevicesView() {
                   />
                 )
               },
+              {
+                id: "boundary",
+                icon: <Square size={15} strokeWidth={1.8} />,
+                label: "Boundary",
+                desc: "Quest guardian boundary system",
+                control: <Toggle checked={boundary} onChange={handleToggleBoundary} />
+              },
             ].map(({ id, icon, label, desc, action, status, btnLabel, control }: any) => (
               <div
                 key={id}
@@ -505,19 +519,7 @@ export function DevicesView() {
             ))}
 
 
-            <div
-              className="table-row"
-              style={{ gridTemplateColumns: "28px 1fr auto", height: "52px", gap: "10px" }}
-            >
-              <span style={{ color: "var(--color-text-secondary)", fontSize: "15px" }}>🔲</span>
-              <div>
-                <div style={{ fontWeight: 500, fontSize: "13px" }}>Boundary</div>
-                <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "1px" }}>
-                  Quest guardian boundary system
-                </div>
-              </div>
-              <Toggle checked={boundary} onChange={handleToggleBoundary} />
-            </div>
+
           </div>
 
           {/* ── Section: Gallery ── */}
@@ -539,7 +541,7 @@ export function DevicesView() {
               <button 
                 onClick={async () => {
                    if (!selectedDevice) return;
-                   const list = await invoke<string[]>("list_remote_media", { deviceId: selectedDevice.id });
+                   const list = await invoke<FileEntry[]>("list_remote_media", { deviceId: selectedDevice.id });
                    setRemoteMedia(list);
                    toast.success("Gallery refreshed");
                 }}
@@ -550,18 +552,23 @@ export function DevicesView() {
               </button>
             </div>
 
-            <div style={{ padding: "12px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", gap: "10px" }}>
+            <div style={{ 
+              padding: "12px", 
+              display: "grid", 
+              gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", 
+              gap: "10px" 
+            }}>
               {remoteMedia.length === 0 ? (
                 <div style={{ gridColumn: "1/-1", padding: "20px", textAlign: "center", color: "var(--color-text-disabled)", fontSize: "11px" }}>
-                  No screenshots or videos found on device root.
+                  No screenshots or videos found on device.
                 </div>
               ) : (
                 remoteMedia.map(file => (
                   <div 
-                    key={file} 
+                    key={file.path} 
                     onClick={async () => {
                        if (!selectedDevice) return;
-                       toast.promise(invoke("open_remote_media", { deviceId: selectedDevice.id, filename: file }), {
+                       toast.promise(invoke("open_remote_media", { deviceId: selectedDevice.id, path: file.path }), {
                          loading: "Opening media...",
                          success: "Media opened",
                          error: "Failed to open media"
@@ -570,7 +577,7 @@ export function DevicesView() {
                     style={{ 
                       aspectRatio: "1/1", 
                       background: "rgba(255,255,255,0.03)", 
-                      borderRadius: "6px", 
+                      borderRadius: "10px", 
                       border: "1px solid var(--color-surface-border)",
                       display: "flex",
                       flexDirection: "column",
@@ -579,43 +586,110 @@ export function DevicesView() {
                       position: "relative",
                       overflow: "hidden",
                       cursor: "pointer",
-                      transition: "transform 0.15s"
+                      transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.2)"
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.05)"}
-                    onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1.0)"}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = "translateY(-4px)";
+                      e.currentTarget.style.borderColor = "var(--color-accent)";
+                      e.currentTarget.style.background = "rgba(124, 106, 247, 0.05)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = "translateY(0)";
+                      e.currentTarget.style.borderColor = "var(--color-surface-border)";
+                      e.currentTarget.style.background = "rgba(255,255,255,0.03)";
+                    }}
                   >
-                    {file.endsWith(".png") ? <Camera size={24} style={{ opacity: 0.3 }} /> : <Video size={24} style={{ opacity: 0.3 }} />}
-                    <div style={{ fontSize: "9px", marginTop: "4px", maxWidth: "90%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "0 4px" }}>
-                      {file.replace("screenshot_", "").replace("video_", "")}
+                    <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                      {file.name.toLowerCase().match(/\.(png|jpg|jpeg|webp|gif)$/) ? (
+                        <FileImage size={22} style={{ color: "var(--color-success)", opacity: 0.9 }} />
+                      ) : (
+                        <FileVideo size={22} style={{ color: "var(--color-error)", opacity: 0.9 }} />
+                      )}
+                      <div style={{ 
+                        fontSize: "9px", 
+                        marginTop: "6px", 
+                        maxWidth: "70px", 
+                        overflow: "hidden", 
+                        textOverflow: "ellipsis", 
+                        whiteSpace: "nowrap", 
+                        fontWeight: 600,
+                        color: "var(--color-text-secondary)"
+                      }}>
+                        {file.name.replace(/^com\./i, "").replace(/\.[^/.]+$/, "")}
+                      </div>
+                      <div style={{ fontSize: "8px", color: "var(--color-text-disabled)", marginTop: "1px" }}>
+                        {file.sizeBytes ? (file.sizeBytes / 1024 / 1024).toFixed(1) + " MB" : ""}
+                      </div>
                     </div>
                     
-                    <button 
-                      onClick={async (e) => {
-                         e.stopPropagation();
-                         if (!selectedDevice) return;
-                         await invoke("delete_remote_media", { deviceId: selectedDevice.id, filename: file });
-                         setRemoteMedia(prev => prev.filter(f => f !== file));
-                         toast.success("Deleted from device");
-                      }}
-                      style={{
-                        position: "absolute",
-                        top: "4px",
-                        right: "4px",
-                        background: "var(--color-error)",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "4px",
-                        width: "18px",
-                        height: "18px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                        opacity: 0.8
-                      }}
-                    >
-                      <X size={10} />
-                    </button>
+                    {/* Action buttons Overlay */}
+                    <div className="media-actions" style={{
+                      position: "absolute",
+                      bottom: "0",
+                      left: "0",
+                      right: "0",
+                      padding: "4px",
+                      display: "flex",
+                      justifyContent: "center",
+                      gap: "4px",
+                      background: "linear-gradient(transparent, rgba(0,0,0,0.8))",
+                      transform: "translateY(100%)",
+                      transition: "transform 0.2s"
+                    }}>
+                      <button 
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await downloadFile(file);
+                        }}
+                        className="media-btn"
+                        style={{
+                          background: "var(--color-accent)",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          width: "24px",
+                          height: "24px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer"
+                        }}
+                        title="Download"
+                      >
+                        <Download size={12} />
+                      </button>
+                      <button 
+                        onClick={async (e) => {
+                           e.stopPropagation();
+                           if (!selectedDevice) return;
+                           await invoke("delete_remote_media", { deviceId: selectedDevice.id, path: file.path });
+                           setRemoteMedia(prev => prev.filter(f => f.path !== file.path));
+                           toast.success("Deleted from device");
+                        }}
+                        style={{
+                          background: "var(--color-error)",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          width: "24px",
+                          height: "24px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer"
+                        }}
+                        title="Delete"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+
+                    <style>{`
+                      div:hover > .media-actions {
+                        transform: translateY(0) !important;
+                      }
+                    `}</style>
                   </div>
                 ))
               )}

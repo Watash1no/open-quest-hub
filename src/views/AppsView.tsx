@@ -76,7 +76,7 @@ export function AppsView() {
 
           {/* Right Sidebar Area (Install) */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "20px" }}>
-            <div className="section-card" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="section-card" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "16px", flexShrink: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <Plus size={16} color="var(--color-accent)" strokeWidth={2} />
                 <span style={{ fontWeight: 700, fontSize: "14px" }}>Install New</span>
@@ -89,7 +89,7 @@ export function AppsView() {
               </div>
             </div>
 
-            <div className="section-card" style={{ padding: "16px" }}>
+            <div className="section-card" style={{ padding: "16px", flexShrink: 0 }}>
               <h3 style={{ fontSize: "12px", fontWeight: 700, marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-secondary)" }}>
                 Stats
               </h3>
@@ -128,7 +128,15 @@ export function AppsView() {
               </button>
 
               {abandoned.length > 0 && (
-                <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div style={{ 
+                  marginTop: "8px", 
+                  display: "flex", 
+                  flexDirection: "column", 
+                  gap: "6px", 
+                  maxHeight: "300px", 
+                  overflowY: "auto",
+                  paddingRight: "4px"
+                }}>
                   {abandoned.map(pkg => (
                     <div key={pkg} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 8px", background: "rgba(239, 68, 68, 0.05)", borderRadius: "6px", border: "1px solid rgba(239, 68, 68, 0.1)" }}>
                       <span style={{ fontSize: "11px", color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "120px" }}>{pkg}</span>

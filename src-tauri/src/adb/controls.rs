@@ -1,6 +1,8 @@
 use crate::adb::run_adb_device;
 use crate::adb::logcat::ProcessManager;
 use crate::error::AppError;
+use crate::models::FileEntry;
+use crate::adb::files::list_files_with_args;
 use tokio::process::Command;
 use tauri::State;
 
@@ -54,8 +56,8 @@ pub async fn take_screenshot(app: tauri::AppHandle, device_id: String) -> Result
     // Note: for simplicity here we just use run_adb_device with pull
     crate::adb::run_adb_device(&app, &device_id, &["pull", &remote_path, &local_path_str]).await?;
     
-    // 3. Delete from device
-    let _ = run_adb_device(&app, &device_id, &["shell", "rm", &remote_path]).await;
+    // 3. Delete from device (COMMMENTED OUT - we want to keep it for the gallery)
+    // let _ = run_adb_device(&app, &device_id, &["shell", "rm", &remote_path]).await;
     
     Ok(local_path_str)
 }
@@ -209,42 +211,77 @@ pub async fn stop_casting(
 }
 
 /// Lists media files (screenshots/videos) created by this app on the device.
+/// Returns the 10 most recent files sorted by modification time.
 #[tauri::command]
-pub async fn list_remote_media(app: tauri::AppHandle, device_id: String) -> Result<Vec<String>, AppError> {
-    let raw = match run_adb_device(&app, &device_id, &["shell", "ls", "-1", "/sdcard/"]).await {
-        Ok(out) => out,
-        Err(_) => return Ok(Vec::new()),
-    };
-    let mut media = Vec::new();
-    for line in raw.lines() {
-        let name = line.trim();
-        if name.starts_with("screenshot_") || name.starts_with("video_") {
-            media.push(name.to_string());
+pub async fn list_remote_media(app: tauri::AppHandle, device_id: String) -> Result<Vec<FileEntry>, AppError> {
+    let paths = vec![
+        "/sdcard/Oculus/Screenshots/",
+        "/sdcard/Oculus/VideoShots/",
+        "/sdcard/Pictures/Screenshots/",
+        "/sdcard/DCIM/Screenshots/",
+        "/sdcard/Pictures/",
+        "/sdcard/DCIM/",
+    ];
+    
+    let mut all_media = Vec::new();
+    
+    for path in paths {
+        if let Ok(files) = list_files_with_args(app.clone(), device_id.clone(), path.to_string(), &["-lat"]).await {
+            for entry in files {
+                let name_lower = entry.name.to_lowercase();
+                if name_lower.ends_with(".png") || 
+                   name_lower.ends_with(".jpg") || 
+                   name_lower.ends_with(".jpeg") || 
+                   name_lower.ends_with(".mp4") ||
+                   name_lower.ends_with(".webm") {
+                    all_media.push(entry);
+                }
+            }
         }
     }
-    Ok(media)
+    
+    // Sort by modification time (descending)
+    all_media.sort_by(|a, b| {
+        let default_time = "".to_string();
+        let time_a = a.modified.as_ref().unwrap_or(&default_time);
+        let time_b = b.modified.as_ref().unwrap_or(&default_time);
+        // We want to handle potentially different date formats if they exist, 
+        // but generally ls -lat is consistent.
+        time_b.cmp(time_a) // Newest first
+    });
+    
+    // De-duplicate by path using a HashSet to keep order
+    let mut seen = std::collections::HashSet::new();
+    all_media.retain(|item| seen.insert(item.path.clone()));
+    
+    // Take top 10
+    all_media.truncate(10);
+    
+    Ok(all_media)
 }
 
 /// Deletes a media file from the device.
 #[tauri::command]
-pub async fn delete_remote_media(app: tauri::AppHandle, device_id: String, filename: String) -> Result<(), AppError> {
-    run_adb_device(&app, &device_id, &["shell", "rm", &format!("/sdcard/{}", filename)]).await?;
+pub async fn delete_remote_media(app: tauri::AppHandle, device_id: String, path: String) -> Result<(), AppError> {
+    run_adb_device(&app, &device_id, &["shell", "rm", &path]).await?;
     Ok(())
 }
 
 /// Pulls a remote file to a temp location and opens it.
 #[tauri::command]
-pub async fn open_remote_media(app: tauri::AppHandle, device_id: String, filename: String) -> Result<(), AppError> {
+pub async fn open_remote_media(app: tauri::AppHandle, device_id: String, path: String) -> Result<(), AppError> {
     use tauri_plugin_opener::OpenerExt;
 
     let adb = crate::adb::find_adb(&app)?;
     let temp_dir = std::env::temp_dir();
-    let local_path = temp_dir.join(&filename);
+    // Use the name from the end of the path
+    let filename = path.split('/').last().unwrap_or("media_file");
+    let local_path = temp_dir.join(filename);
     let local_path_str = local_path.to_string_lossy().to_string();
 
     // Pull file (async — does not block the Tokio thread pool)
     let mut cmd = Command::new(adb);
-    cmd.args(["-s", &device_id, "pull", &format!("/sdcard/{}", filename), &local_path_str]);
+    cmd.args(["-s", &device_id, "pull", &path, &local_path_str]);
 
     #[cfg(windows)]
     {

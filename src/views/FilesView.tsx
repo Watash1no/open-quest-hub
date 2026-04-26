@@ -7,7 +7,6 @@ import { useAppStore } from "../store/useAppStore";
 const QUEST_PATHS = [
   { name: "Screenshots",   path: "/sdcard/Oculus/Screenshots",  icon: <Camera size={13} /> },
   { name: "Video Shots",   path: "/sdcard/Oculus/VideoShots",   icon: <Video size={13} /> },
-  { name: "360 Photos",    path: "/sdcard/Oculus/360Photos",    icon: <Image size={13} /> },
   { name: "Oculus",        path: "/sdcard/Oculus",              icon: <Headset size={13} /> },
 ];
 

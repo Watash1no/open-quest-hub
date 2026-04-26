@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "build:app": "npm run tauri build && copy src-tauri\\target\\release\\openquest-hub.exe builds\\openquest-hub.exe"
+    "build:app": "npm run tauri build && node scripts/post-build.js"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

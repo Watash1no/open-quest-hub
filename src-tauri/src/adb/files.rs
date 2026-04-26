@@ -9,6 +9,11 @@ use super::run_adb_device;
 /// Runs: adb -s <id> shell ls -la <path>
 #[tauri::command]
 pub async fn list_files(app: AppHandle, device_id: String, path: String) -> Result<Vec<FileEntry>, AppError> {
+    list_files_with_args(app, device_id, path, &["-la"]).await
+}
+
+/// A more flexible version of list_files that accepts extra ls arguments (e.g. -t for time sorting).
+pub async fn list_files_with_args(app: AppHandle, device_id: String, path: String, extra_args: &[&str]) -> Result<Vec<FileEntry>, AppError> {
     // We use a trailing slash for directories to ensure ls behavior is consistent,
     // but we must be careful with root.
     let target_path = if path.ends_with('/') || path.is_empty() {
@@ -17,7 +22,11 @@ pub async fn list_files(app: AppHandle, device_id: String, path: String) -> Resu
         format!("{}/", path)
     };
 
-    let raw = match run_adb_device(&app, &device_id, &["shell", "ls", "-la", &target_path]).await {
+    let mut args = vec!["shell", "ls"];
+    args.extend_from_slice(extra_args);
+    args.push(&target_path);
+
+    let raw = match run_adb_device(&app, &device_id, &args).await {
         Ok(out) => out,
         Err(AppError::CommandFailed(err)) if err.contains("Permission denied") => {
             return Ok(Vec::new());
@@ -34,32 +43,65 @@ pub async fn list_files(app: AppHandle, device_id: String, path: String) -> Resu
         }
 
         // Parse ls -la output:
-        // drwxr-xr-x  2 root   root        4096 2023-10-25 10:14 .
-        // -rw-r--r--  1 root   root       12345 2023-10-25 10:14 file.txt
+        // Case A (8 parts): -rw-r--r--  1 root   root       12345 2023-10-25 10:14 file.txt
+        // Case B (7 parts): -rw-r--r--  root   root       12345 2023-10-25 10:14 file.txt
+        // Case C (9 parts): -rw-r--r--  1 root   root       12345 Oct 25 10:14 file.txt
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 7 {
+        if parts.len() < 6 {
             continue;
         }
 
         let permissions = parts[0];
         let is_dir = permissions.starts_with('d');
+
+        // We need to find where the name starts.
+        // We'll look for the date/time pattern to anchor ourselves.
+        // Typical: ... size date time name
+        // Or: ... size month day time/year name
         
-        // Name is the last part(s)
-        // Note: links "name -> target" should be handled
-        let name_with_link = parts[7..].join(" ");
+        let mut name_start_idx = 7;
+        let mut size_idx = 4;
+        let mut date_parts = (5, 6);
+
+        // If parts[1] is NOT a number, then links count is likely missing (Case B)
+        if parts[1].parse::<u64>().is_err() {
+            size_idx = 3;
+            date_parts = (4, 5);
+            name_start_idx = 6;
+        } else if parts.len() >= 9 && parts[5].len() == 3 && !parts[5].chars().next().unwrap().is_numeric() {
+            // Case C: month day time name
+            size_idx = 4;
+            date_parts = (5, 7); // month day time
+            name_start_idx = 8;
+        }
+
+        if parts.len() <= name_start_idx {
+            continue;
+        }
+
+        let name_with_link = parts[name_start_idx..].join(" ");
         let name = if let Some(idx) = name_with_link.find(" -> ") {
             &name_with_link[..idx]
         } else {
             &name_with_link
         };
 
-        // Skip . and ..
         if name == "." || name == ".." {
             continue;
         }
 
-        let size_bytes = parts[3].parse::<u64>().ok();
-        let modified = format!("{} {}", parts[5], parts[6]);
+        let size_bytes = parts.get(size_idx).and_then(|s| s.parse::<u64>().ok());
+        
+        let modified = if date_parts.1 < parts.len() {
+            if name_start_idx == 8 {
+                // Month format
+                format!("{} {} {}", parts[5], parts[6], parts[7])
+            } else {
+                format!("{} {}", parts[date_parts.0], parts[date_parts.1])
+            }
+        } else {
+            String::new()
+        };
 
         let full_path = if path.ends_with('/') {
             format!("{}{}", path, name)
@@ -75,15 +117,6 @@ pub async fn list_files(app: AppHandle, device_id: String, path: String) -> Resu
             modified: Some(modified),
         });
     }
-
-    // Sort: directories first, then alphabetical
-    entries.sort_by(|a, b| {
-        if a.is_dir != b.is_dir {
-            b.is_dir.cmp(&a.is_dir)
-        } else {
-            a.name.to_lowercase().cmp(&b.name.to_lowercase())
-        }
-    });
 
     Ok(entries)
 }
@@ -167,4 +200,12 @@ pub fn save_setting<R: tauri::Runtime>(
         store.save().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+// ── P3.5: write_text_file ────────────────────────────────────────────────────
+
+/// Writes a string to a local file.
+#[tauri::command]
+pub async fn write_text_file(path: String, content: String) -> Result<(), AppError> {
+    std::fs::write(&path, content).map_err(AppError::Io)
 }

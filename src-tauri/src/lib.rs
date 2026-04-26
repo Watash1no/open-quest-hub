@@ -9,7 +9,7 @@ use adb::devices::{list_devices, get_adb_status};
 use adb::apps::{list_packages, uninstall_app, launch_app, stop_app, install_with_obb, list_abandoned_obbs, delete_obb_folder};
 use adb::logcat::{start_logcat, stop_logcat, stop_all_logcat, ProcessManager};
 
-use adb::files::{list_files, pull_file, join_path, save_setting};
+use adb::files::{list_files, pull_file, join_path, save_setting, write_text_file};
 use adb::controls::{toggle_boundary, enable_wifi_adb, disable_wifi_adb, take_screenshot, record_video, cast_device, stop_casting, get_device_ip, connect_device_ip, setup_wireless_adb, list_remote_media, delete_remote_media, open_remote_media};
 
 
@@ -51,6 +51,7 @@ pub fn run() {
             open_remote_media,
             join_path,
             save_setting,
+            write_text_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

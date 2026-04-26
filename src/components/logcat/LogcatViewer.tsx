@@ -3,6 +3,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAppStore } from "../../store/useAppStore";
 import { LogLevel } from "../../types";
 
+import { getFilteredLines } from "../../utils/logFilters";
+
 const LEVEL_COLORS: Record<string, string> = {
   [LogLevel.Verbose]: "#94a3b8", // slate-400
   [LogLevel.Debug]: "#38bdf8",   // sky-400
@@ -10,16 +12,6 @@ const LEVEL_COLORS: Record<string, string> = {
   [LogLevel.Warn]: "#fbbf24",    // amber-400
   [LogLevel.Error]: "#f87171",   // red-400
   [LogLevel.Unknown]: "#64748b", // slate-500
-};
-
-const LEVEL_PRIORITY: Record<string, number> = {
-  [LogLevel.Verbose]: 0,
-  [LogLevel.Debug]: 1,
-  [LogLevel.Info]: 2,
-  [LogLevel.Warn]: 3,
-  [LogLevel.Error]: 4,
-  [LogLevel.Fatal]: 5,
-  [LogLevel.Unknown]: -1,
 };
 
 export function LogcatViewer() {
@@ -33,22 +25,7 @@ export function LogcatViewer() {
 
   // 1. Filter lines regardless of pause
   const filteredLines = useMemo(() => {
-    return logLines.filter((line) => {
-      // Search filter
-      if (logSearch) {
-        const query = logSearch.toLowerCase();
-        const inMessage = line.message.toLowerCase().includes(query);
-        const inTag = line.tag?.toLowerCase().includes(query);
-        if (!inMessage && !inTag) return false;
-      }
-      // Level filter
-      if (minLogLevel) {
-        const linePriority = LEVEL_PRIORITY[line.level] ?? -1;
-        const minPriority = LEVEL_PRIORITY[minLogLevel] ?? 0;
-        if (linePriority < minPriority) return false;
-      }
-      return true;
-    });
+    return getFilteredLines(logLines, logSearch, minLogLevel);
   }, [logLines, logSearch, minLogLevel]);
 
   // 2. Manage what's actually shown (respecting Pause)

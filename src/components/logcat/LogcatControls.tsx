@@ -1,7 +1,10 @@
-import { Trash, Pause, Play, ArrowDown, Search, Terminal, Square, Filter } from "lucide-react";
+import { Trash, Pause, Play, ArrowDown, Search, Terminal, Square, Filter, Save } from "lucide-react";
 import { useAppStore } from "../../store/useAppStore";
 import { LogLevel } from "../../types";
 import { toast } from "sonner";
+import { save } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { getFilteredLines } from "../../utils/logFilters";
 
 interface LogcatControlsProps {
   isRunning: boolean;
@@ -19,11 +22,38 @@ export function LogcatControls({ isRunning, onStart, onStop }: LogcatControlsPro
   const setMinLogLevel = useAppStore((s) => s.setMinLogLevel);
   const logcatArgs = useAppStore((s) => s.logcatArgs);
   const setLogcatArgs = useAppStore((s) => s.setLogcatArgs);
+  const logLines = useAppStore((s) => s.logLines);
 
   const handleStop = async () => {
     // Also clear pause state when stopping so the app isn't stuck
     setLogPaused(false);
     await onStop();
+  };
+
+  const handleSaveLogs = async () => {
+    const filtered = getFilteredLines(logLines, logSearch, minLogLevel);
+    if (filtered.length === 0) {
+      toast.error("No logs to save with current filters");
+      return;
+    }
+
+    // Join by newlines. We use .raw to keep the original formatting.
+    const content = filtered.map(l => l.raw).join('\n');
+    
+    try {
+      const filePath = await save({
+        filters: [{ name: 'Text', extensions: ['txt'] }],
+        defaultPath: `logcat_${new Date().getTime()}.txt`
+      });
+
+      if (filePath) {
+        await invoke("write_text_file", { path: filePath, content });
+        toast.success("Logs saved successfully");
+      }
+    } catch (err) {
+      toast.error("Failed to save logs");
+      console.error(err);
+    }
   };
 
   return (
@@ -156,6 +186,16 @@ export function LogcatControls({ isRunning, onStart, onStop }: LogcatControlsPro
           ) : (
             <><Play size={14} fill="white" /> Start Stream</>
           )}
+        </button>
+
+        <button
+          className="icon-btn"
+          onClick={handleSaveLogs}
+          disabled={logLines.length === 0}
+          title="Save logs to file"
+          style={{ opacity: logLines.length === 0 ? 0.5 : 1, cursor: logLines.length === 0 ? "not-allowed" : "pointer" }}
+        >
+          <Save size={16} />
         </button>
 
         <button
