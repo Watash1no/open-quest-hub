@@ -1,6 +1,6 @@
 [package]
 name = "openquest-hub"
-version = "0.1.0"
+version = "1.0.0"
 description = "Open Quest Hub — ADB Device Manager"
 authors = ["you"]
 edition = "2021"

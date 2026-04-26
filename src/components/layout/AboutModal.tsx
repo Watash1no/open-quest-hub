@@ -8,7 +8,7 @@ interface Props {
 
 // ── App version info ─────────────────────────────────────────────────────────
 // TODO: Pull these from tauri's package.json or a build-time constant
-const APP_VERSION = "0.1.0";
+const APP_VERSION = "1.0.0";
 const BUILD_DATE = "2026-04"; // TODO: inject at build time
 // TODO: Add update check endpoint URL here when backend is ready
 // const UPDATE_CHECK_URL = "https://api.github.com/repos/yourusername/openquest/releases/latest";
@@ -270,6 +270,20 @@ export function AboutModal({ open, onClose }: Props) {
           >
             <ChevronRight size={13} />
             <span>Changelog & release notes — coming soon</span>
+          </div>
+
+          <div
+            style={{
+              marginTop: "24px",
+              paddingTop: "16px",
+              borderTop: "1px dashed var(--color-surface-border)",
+              textAlign: "center",
+              fontSize: "13px",
+              color: "var(--color-text-secondary)",
+              fontWeight: 500
+            }}
+          >
+            Это версия 1.0.0
           </div>
         </div>
 
