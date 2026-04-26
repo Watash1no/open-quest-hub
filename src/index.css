@@ -272,6 +272,89 @@ html, body, #root {
   background: #e81123;
   color: white;
 }
+
+/* ── Platform-Specific TitleBar ── */
+.titlebar {
+  height: 32px;
+  background: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  border-bottom: 1px solid var(--color-surface-border);
+  flex-shrink: 0;
+  z-index: 1001;
+  padding: 0 12px;
+}
+
+.titlebar.is-mac {
+  padding: 0 16px;
+}
+
+.titlebar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.5;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.titlebar-title.centered {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.titlebar-logo {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+}
+
+.titlebar-controls {
+  display: flex;
+  height: 100%;
+}
+
+.titlebar-controls.left {
+  gap: 8px;
+  align-items: center;
+}
+
+/* macOS Traffic Lights */
+.titlebar-btn.mac-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  background: #333; /* Neutral by default */
+  transition: background 0.2s;
+}
+
+.titlebar:hover .titlebar-btn.mac-dot.close { background: #ff5f57; }
+.titlebar:hover .titlebar-btn.mac-dot.minimize { background: #ffbd2e; }
+.titlebar:hover .titlebar-btn.mac-dot.maximize { background: #28c940; }
+
+.titlebar-btn.mac-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.1);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.titlebar-btn.mac-dot:hover::after {
+  opacity: 1;
+}
 .toggle input:checked + .toggle-track { background: var(--color-accent); }
 .toggle-thumb {
   position: absolute;

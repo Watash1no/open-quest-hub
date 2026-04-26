@@ -1,11 +1,11 @@
 use crate::error::AppError;
-use tauri::Manager;
 
 
-pub fn get_scrcpy_path(app: &tauri::AppHandle) -> Option<String> {
+
+pub fn get_scrcpy_path(_app: &tauri::AppHandle) -> Option<String> {
     #[cfg(target_os = "windows")]
     {
-        if let Ok(path) = app.path().app_local_data_dir() {
+        if let Ok(path) = _app.path().app_local_data_dir() {
             let exe_path = path.join("scrcpy").join("scrcpy.exe");
             if exe_path.exists() {
                 return Some(exe_path.to_string_lossy().to_string());

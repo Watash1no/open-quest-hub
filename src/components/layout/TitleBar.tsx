@@ -5,40 +5,49 @@ import logo from "../../assets/logo.png";
 const appWindow = getCurrentWindow();
 
 export function TitleBar() {
+  const isMac = typeof window !== 'undefined' && /Mac|iPhone|iPod|iPad/i.test(navigator.userAgent);
+
   return (
     <div 
       data-tauri-drag-region
-      style={{
-        height: "32px",
-        background: "var(--color-surface)",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: "0 0 0 12px",
-        userSelect: "none",
-        borderBottom: "1px solid var(--color-surface-border)",
-        flexShrink: 0,
-        zIndex: 1001,
-      }}
+      className={`titlebar ${isMac ? 'is-mac' : ''}`}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", pointerEvents: "none" }}>
-        <img src={logo} style={{ width: "14px", height: "14px", objectFit: "contain" }} alt="" />
-        <span style={{ fontSize: "11px", fontWeight: 700, opacity: 0.5, letterSpacing: "0.02em", textTransform: "uppercase" }}>
-          Open Quest Hub
-        </span>
-      </div>
+      {isMac ? (
+        <>
+          <div className="titlebar-controls left">
+            <button className="titlebar-btn mac-dot close" onClick={() => appWindow.close()} title="Close" />
+            <button className="titlebar-btn mac-dot minimize" onClick={() => appWindow.minimize()} title="Minimize" />
+            <button className="titlebar-btn mac-dot maximize" onClick={() => appWindow.toggleMaximize()} title="Maximize" />
+          </div>
+          
+          <div className="titlebar-title centered">
+            <img src={logo} className="titlebar-logo" alt="" />
+            <span>Open Quest Hub</span>
+          </div>
+          
+          {/* Spacer to keep title centered */}
+          <div style={{ width: 52 }} />
+        </>
+      ) : (
+        <>
+          <div className="titlebar-title">
+            <img src={logo} className="titlebar-logo" alt="" />
+            <span>Open Quest Hub</span>
+          </div>
 
-      <div style={{ display: "flex", height: "100%" }}>
-        <button className="titlebar-btn" onClick={() => appWindow.minimize()} title="Minimize">
-          <Minus size={14} />
-        </button>
-        <button className="titlebar-btn" onClick={() => appWindow.toggleMaximize()} title="Maximize">
-          <Square size={10} />
-        </button>
-        <button className="titlebar-btn hover-danger" onClick={() => appWindow.close()} title="Close">
-          <X size={14} />
-        </button>
-      </div>
+          <div className="titlebar-controls right">
+            <button className="titlebar-btn" onClick={() => appWindow.minimize()} title="Minimize">
+              <Minus size={14} />
+            </button>
+            <button className="titlebar-btn" onClick={() => appWindow.toggleMaximize()} title="Maximize">
+              <Square size={10} />
+            </button>
+            <button className="titlebar-btn hover-danger" onClick={() => appWindow.close()} title="Close">
+              <X size={14} />
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
