@@ -151,7 +151,7 @@ export function DeviceCard({ device, isSelected, onSelect }: DeviceCardProps) {
         </span>
 
         {/* Android version */}
-        {device.androidVersion && (
+        {device.androidVersion && device.androidVersion !== "Loading..." && (
           <span style={{ fontSize: "11px", color: "var(--color-text-secondary)" }}>
             Android {device.androidVersion}
           </span>
@@ -175,7 +175,7 @@ export function DeviceCard({ device, isSelected, onSelect }: DeviceCardProps) {
 
         {/* Battery */}
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          {device.batteryLevel !== null && (
+          {device.batteryLevel !== null && device.batteryLevel !== -1 && (
             <span
               style={{
                 display: "inline-flex",
@@ -192,18 +192,19 @@ export function DeviceCard({ device, isSelected, onSelect }: DeviceCardProps) {
               {device.batteryLevel}%
             </span>
           )}
-
+ 
           {/* Controllers */}
-          {(device.controllerBatteryLeft !== null || device.controllerBatteryRight !== null) && (
+          {((device.controllerBatteryLeft !== null && device.controllerBatteryLeft !== -1) || 
+            (device.controllerBatteryRight !== null && device.controllerBatteryRight !== -1)) && (
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginLeft: "2px", paddingLeft: "8px", borderLeft: "1px solid rgba(255,255,255,0.1)" }}>
               <Gamepad2 size={11} strokeWidth={1.8} color="var(--color-text-tertiary)" />
-              {device.controllerBatteryLeft !== null && (
+              {device.controllerBatteryLeft !== null && device.controllerBatteryLeft !== -1 && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: "2px", fontSize: "10px", color: "var(--color-text-secondary)" }}>
                   <span style={{ opacity: 0.5, fontSize: "9px", fontWeight: 700 }}>L</span>
                   {device.controllerBatteryLeft}%
                 </span>
               )}
-              {device.controllerBatteryRight !== null && (
+              {device.controllerBatteryRight !== null && device.controllerBatteryRight !== -1 && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: "2px", fontSize: "10px", color: "var(--color-text-secondary)" }}>
                   <span style={{ opacity: 0.5, fontSize: "9px", fontWeight: 700 }}>R</span>
                   {device.controllerBatteryRight}%

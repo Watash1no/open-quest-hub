@@ -226,19 +226,6 @@ export function DeviceTopBar() {
 
         <button
           className="icon-btn"
-          title={isCasting ? "Stop casting" : "Cast device (scrcpy)"}
-          disabled={!device}
-          onClick={handleCast}
-          style={{
-            color: isCasting ? "var(--color-error, #f87171)" : undefined,
-            background: isCasting ? "var(--color-error-muted, rgba(248,113,113,0.1))" : undefined,
-          }}
-        >
-          {isCasting ? <Square size={15} strokeWidth={1.8} /> : <Cast size={15} strokeWidth={1.8} />}
-        </button>
-
-        <button
-          className="icon-btn"
           title="Start screen recording"
           disabled={!device}
           onClick={handleRecord}
@@ -253,6 +240,19 @@ export function DeviceTopBar() {
           onClick={handleScreenshot}
         >
           <Camera size={15} strokeWidth={1.8} />
+        </button>
+
+        <button
+          className="icon-btn"
+          title={isCasting ? "Stop casting" : "Cast device (scrcpy)"}
+          disabled={!device}
+          onClick={handleCast}
+          style={{
+            color: isCasting ? "var(--color-error, #f87171)" : undefined,
+            background: isCasting ? "var(--color-error-muted, rgba(248,113,113,0.1))" : undefined,
+          }}
+        >
+          {isCasting ? <Square size={15} strokeWidth={1.8} /> : <Cast size={15} strokeWidth={1.8} />}
         </button>
       </div>
     </header>

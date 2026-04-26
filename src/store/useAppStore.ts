@@ -137,7 +137,29 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   eventLog: [],
 
   // Actions
-  setDevices: (devices) => set({ devices }),
+  setDevices: (newDevices) =>
+    set((state) => {
+      // Merge detailed info (battery, android version, model) from existing state 
+      // if the incoming newDevices has "fast-list" placeholders
+      const merged = newDevices.map((next) => {
+        const prev = state.devices.find((d) => d.id === next.id);
+        if (!prev) return next;
+
+        const isFastUpdate = next.androidVersion === "Loading...";
+
+        return {
+          ...next,
+          // If next is a "fast placeholder", prefer the old value
+          batteryLevel: (next.batteryLevel === -1 || next.batteryLevel === null || isFastUpdate) ? prev.batteryLevel : next.batteryLevel,
+          androidVersion: isFastUpdate ? prev.androidVersion : next.androidVersion,
+          model: (isFastUpdate && prev.model !== "Unknown") ? prev.model : next.model,
+          // Controllers too
+          controllerBatteryLeft: next.controllerBatteryLeft ?? prev.controllerBatteryLeft,
+          controllerBatteryRight: next.controllerBatteryRight ?? prev.controllerBatteryRight,
+        };
+      });
+      return { devices: merged };
+    }),
 
   setSelectedDevice: (selectedSerial) => set({ selectedSerial }),
 

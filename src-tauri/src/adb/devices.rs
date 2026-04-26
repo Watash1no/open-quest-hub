@@ -1,5 +1,5 @@
 use tauri::AppHandle;
-use crate::adb::{run_adb, run_adb_device, find_adb, run_adb_device_with_timeout};
+use crate::adb::{run_adb, find_adb, run_adb_device_with_timeout};
 use crate::error::AppError;
 use crate::models::{ConnectionType, Device, DeviceStatus};
 
@@ -120,6 +120,8 @@ fn extract_battery_value(line: &str) -> Option<i32> {
 }
 
 /// Tauri command: list all connected ADB devices with metadata, merging USB and WiFi connections.
+/// Tauri command: list all connected ADB devices with basic metadata immediately.
+/// Fetches detailed info (battery, etc.) in the background and emits 'devices-updated'.
 #[tauri::command]
 pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
     let output = run_adb(&app, &["devices", "-l"]).await?;
@@ -131,28 +133,12 @@ pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
         }
     }
 
-    // Parallelize info fetching for all Online devices
-    let mut futures = Vec::new();
-    for (id, status, _) in &basic_devices {
-        if *status == DeviceStatus::Online {
-            let app_clone = app.clone();
-            let id_clone = id.clone();
-            futures.push(async move {
-                let info = fetch_device_info(&app_clone, &id_clone).await;
-                (id_clone, info)
-            });
-        }
-    }
-
-    let info_results: std::collections::HashMap<String, Result<(String, String, i32, Option<i32>, Option<i32>, String), AppError>> = 
-        futures_util::future::join_all(futures).await.into_iter().collect();
-
     let mut devices_map: std::collections::HashMap<String, Device> = std::collections::HashMap::new();
+    let mut devices_to_update = Vec::new();
 
     for (id, status, model_from_l) in basic_devices {
         let conn = connection_type(&id);
 
-        // Disconnect and ignore offline Wi-Fi devices
         if status == DeviceStatus::Offline && conn == ConnectionType::WiFi {
             let app_clone = app.clone();
             let id_clone = id.clone();
@@ -162,46 +148,85 @@ pub async fn list_devices(app: AppHandle) -> Result<Vec<Device>, AppError> {
             continue;
         }
 
-        // Try to fetch info, fallback to model from 'adb devices -l' if shell fails or times out
-        let (model, android_version, battery_level, ctrl_l, ctrl_r, hardware_serial) = if status == DeviceStatus::Online {
-            match info_results.get(&id) {
-                Some(Ok(info)) => info.clone(),
-                _ => (
-                    model_from_l.unwrap_or_else(|| "Unknown".into()),
-                    "Unknown".into(),
-                    -1,
-                    None,
-                    None,
-                    id.clone()
-                ),
-            }
-        } else {
-            (model_from_l.unwrap_or_else(|| "Unknown".into()), "Unknown".into(), -1, None, None, id.clone())
-        };
-
-        let mut merged = false;
+        let model = model_from_l.clone().unwrap_or_else(|| "Unknown".into());
+        let serial = id.clone(); // Fallback serial is the ID until we get hardware_serial
         
-        // 1. Exact match on hardware_serial
-        if let Some(existing) = devices_map.get_mut(&hardware_serial) {
-            merge_device(existing, id.clone(), conn, status);
-            merged = true;
-        } 
-        
-        if !merged {
-            devices_map.insert(hardware_serial.clone(), Device {
-                id,
-                serial: hardware_serial,
-                model,
-                android_version,
-                battery_level,
-                controller_battery_left: ctrl_l,
-                controller_battery_right: ctrl_r,
-                connection_types: vec![conn],
-                status,
-            });
+        if status == DeviceStatus::Online {
+            devices_to_update.push((id.clone(), model.clone()));
         }
+
+        devices_map.insert(id.clone(), Device {
+            id,
+            serial,
+            model,
+            android_version: "Loading...".into(),
+            battery_level: -1,
+            controller_battery_left: None,
+            controller_battery_right: None,
+            connection_types: vec![conn],
+            status,
+        });
     }
 
+    // Spawn background update task
+    if !devices_to_update.is_empty() {
+        let app_clone = app.clone();
+        tokio::spawn(async move {
+            let mut update_futures = Vec::new();
+            for (id, _) in devices_to_update {
+                let app_inner = app_clone.clone();
+                update_futures.push(async move {
+                    (id.clone(), fetch_device_info(&app_inner, &id).await)
+                });
+            }
+
+            let results = futures_util::future::join_all(update_futures).await;
+            
+            // Re-list basic to get the current state, then merge
+            if let Ok(output) = run_adb(&app_clone, &["devices", "-l"]).await {
+                let mut final_map: std::collections::HashMap<String, Device> = std::collections::HashMap::new();
+                let results_map: std::collections::HashMap<String, _> = results.into_iter().collect();
+
+                for line in output.lines() {
+                    if let Some((id, status, model_from_l)) = parse_device_line(line) {
+                        let conn = connection_type(&id);
+                        if status == DeviceStatus::Offline && conn == ConnectionType::WiFi { continue; }
+
+                        let (model, android_version, battery_level, ctrl_l, ctrl_r, hardware_serial) = if status == DeviceStatus::Online {
+                            match results_map.get(&id) {
+                                Some(Ok(info)) => info.clone(),
+                                _ => (model_from_l.unwrap_or_else(|| "Unknown".into()), "Unknown".into(), -1, None, None, id.clone()),
+                            }
+                        } else {
+                            (model_from_l.unwrap_or_else(|| "Unknown".into()), "Unknown".into(), -1, None, None, id.clone())
+                        };
+
+                        if let Some(existing) = final_map.get_mut(&hardware_serial) {
+                            merge_device(existing, id.clone(), conn, status);
+                        } else {
+                            final_map.insert(hardware_serial.clone(), Device {
+                                id,
+                                serial: hardware_serial,
+                                model,
+                                android_version,
+                                battery_level,
+                                controller_battery_left: ctrl_l,
+                                controller_battery_right: ctrl_r,
+                                connection_types: vec![conn],
+                                status,
+                            });
+                        }
+                    }
+                }
+                
+                use tauri::Emitter;
+                let _ = app_clone.emit("devices-updated", final_map.into_values().collect::<Vec<_>>());
+            }
+        });
+    }
+
+    // Return the basic list immediately (deduplicated by ID for now, 
+    // background task will handle full hardware_serial deduplication)
     Ok(devices_map.into_values().collect())
 }
 

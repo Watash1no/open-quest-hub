@@ -354,7 +354,6 @@ export function DevicesView() {
               <Upload size={12} strokeWidth={1.5} style={{ opacity: 0.5, flexShrink: 0 }} />
               <span>Drag APK or APK+OBB anywhere onto the window to install</span>
             </div>
-
             {packages.slice(0, 5).map((app: Package) => (
               <AppRow 
                 key={app.name} 
@@ -383,6 +382,23 @@ export function DevicesView() {
 
             {/* Action rows */}
             {[
+              {
+                id: "video",
+                icon: <Video size={15} strokeWidth={1.8} />,
+                label: isRecording ? "Stop Recording" : "Record Video",
+                desc: isRecording ? "Recording in progress..." : "Capture device screen recording",
+                action: handleRecord,
+                status: isRecording ? "stop" : "start",
+                btnLabel: isRecording ? "Stop" : "Start"
+              },
+              {
+                id: "screenshot",
+                icon: <Camera size={15} strokeWidth={1.8} />,
+                label: "Screenshot",
+                desc: "Capture current screen",
+                action: handleScreenshot,
+                btnLabel: "Make"
+              },
               {
                 id: "cast",
                 icon: <Cast size={15} strokeWidth={1.8} />,
@@ -414,24 +430,6 @@ export function DevicesView() {
                 },
                 status: isCasting ? "stop" : "start",
                 btnLabel: isCasting ? "Stop" : "Start"
-              },
-
-              {
-                id: "video",
-                icon: <Video size={15} strokeWidth={1.8} />,
-                label: isRecording ? "Stop Recording" : "Record Video",
-                desc: isRecording ? "Recording in progress..." : "Capture device screen recording",
-                action: handleRecord,
-                status: isRecording ? "stop" : "start",
-                btnLabel: isRecording ? "Stop" : "Start"
-              },
-              {
-                id: "screenshot",
-                icon: <Camera size={15} strokeWidth={1.8} />,
-                label: "Screenshot",
-                desc: "Capture current screen",
-                action: handleScreenshot,
-                btnLabel: "Make"
               },
               {
                 id: "wifi",
@@ -522,9 +520,6 @@ export function DevicesView() {
                 )}
               </div>
             ))}
-
-
-
           </div>
 
           {/* ── Section: Gallery ── */}

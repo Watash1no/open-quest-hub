@@ -1,3 +1,4 @@
+use tauri::Manager;
 use crate::error::AppError;
 
 
@@ -6,6 +7,7 @@ pub fn get_scrcpy_path(_app: &tauri::AppHandle) -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         if let Ok(path) = _app.path().app_local_data_dir() {
+            let path: std::path::PathBuf = path;
             let exe_path = path.join("scrcpy").join("scrcpy.exe");
             if exe_path.exists() {
                 return Some(exe_path.to_string_lossy().to_string());
@@ -67,10 +69,9 @@ pub async fn install_scrcpy(app: tauri::AppHandle) -> Result<String, AppError> {
 
 #[cfg(target_os = "windows")]
 async fn install_scrcpy_windows(app: &tauri::AppHandle) -> Result<String, AppError> {
-    use std::io::Cursor;
     let url = "https://github.com/Genymobile/scrcpy/releases/download/v2.4/scrcpy-win64-v2.4.zip";
     
-    let local_data = app.path().app_local_data_dir().map_err(|e| AppError::CommandFailed(e.to_string()))?;
+    let local_data = app.path().app_local_data_dir().map_err(|e: tauri::Error| AppError::CommandFailed(e.to_string()))?;
     let scrcpy_dir = local_data.join("scrcpy");
     
     if !scrcpy_dir.exists() {
@@ -83,12 +84,35 @@ async fn install_scrcpy_windows(app: &tauri::AppHandle) -> Result<String, AppErr
     let target_dir = scrcpy_dir.clone();
     
     tokio::task::spawn_blocking(move || {
-        let cursor = Cursor::new(bytes);
+        let cursor = std::io::Cursor::new(bytes);
         let mut archive = zip::ZipArchive::new(cursor).map_err(|e| AppError::CommandFailed(e.to_string()))?;
-        archive.extract_unwrapped_root_dir(&target_dir, zip::read::root_dir_common_filter).map_err(|e| AppError::CommandFailed(e.to_string()))
+        
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).map_err(|e| AppError::CommandFailed(e.to_string()))?;
+            let outpath = match file.enclosed_name() {
+                Some(path) => {
+                    let mut components = path.components();
+                    components.next(); // skip root dir in zip
+                    target_dir.join(components.as_path())
+                },
+                None => continue,
+            };
+
+            if (*file.name()).ends_with('/') {
+                std::fs::create_dir_all(&outpath).map_err(|e| AppError::CommandFailed(e.to_string()))?;
+            } else {
+                if let Some(p) = outpath.parent() {
+                    if !p.exists() {
+                        std::fs::create_dir_all(&p).map_err(|e| AppError::CommandFailed(e.to_string()))?;
+                    }
+                }
+                let mut outfile = std::fs::File::create(&outpath).map_err(|e| AppError::CommandFailed(e.to_string()))?;
+                std::io::copy(&mut file, &mut outfile).map_err(|e| AppError::CommandFailed(e.to_string()))?;
+            }
+        }
+        Ok::<(), AppError>(())
     }).await
-      .map_err(|e| AppError::CommandFailed(e.to_string()))?
-      .map_err(|e| AppError::CommandFailed(e.to_string()))?;
+      .map_err(|e| AppError::CommandFailed(e.to_string()))??;
       
     Ok("Installed successfully".to_string())
 }
