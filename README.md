@@ -83,7 +83,7 @@ If you want to build the project from source:
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/Watash1no/openquest_project.git
-   cd openquest-hub
+   cd openquest_project
    ```
 
 2. **Install dependencies:**
@@ -151,11 +151,11 @@ Since the application is currently not signed with official developer certificat
   <a href="https://buymeacoffee.com/watash1no">
     <img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee" />
   </a>
-  <img src="https://img.shields.io/github/license/watash1no/openquest_project?style=for-the-badge" alt="License" />
+  <a href="LICENSE">
+    <img src="https://img.shields.io/github/license/Watash1no/openquest_project?style=for-the-badge" alt="License" />
+  </a>
 </div>
 
-## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 
