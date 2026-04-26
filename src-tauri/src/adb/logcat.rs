@@ -75,9 +75,34 @@ pub async fn start_logcat(
     // Spawn a background task to read stdout
     tokio::spawn(async move {
         let mut lines = reader.lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let log_line = parse_logcat_line(&device_id_clone, &line);
-            let _ = app_clone.emit("logcat-line", log_line);
+        let mut batch = Vec::new();
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+
+        loop {
+            tokio::select! {
+                line_result = lines.next_line() => {
+                    match line_result {
+                        Ok(Some(line)) => {
+                            batch.push(parse_logcat_line(&device_id_clone, &line));
+                            if batch.len() >= 500 {
+                                let _ = app_clone.emit("logcat-lines", &batch);
+                                batch.clear();
+                            }
+                        }
+                        _ => break, // EOF or error
+                    }
+                }
+                _ = interval.tick() => {
+                    if !batch.is_empty() {
+                        let _ = app_clone.emit("logcat-lines", &batch);
+                        batch.clear();
+                    }
+                }
+            }
+        }
+        
+        if !batch.is_empty() {
+            let _ = app_clone.emit("logcat-lines", &batch);
         }
         
         // When loop ends (process died or pipe closed), notify frontend

@@ -69,7 +69,7 @@ interface AppActions {
   setActiveView: (view: ActiveView) => void;
 
   // Logcat
-  appendLogLine: (line: LogLine) => void;
+  appendLogLines: (lines: LogLine[]) => void;
   clearLogLines: () => void;
   setLogPaused: (paused: boolean) => void;
   setLogSearch: (search: string) => void;
@@ -143,9 +143,9 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
 
   setActiveView: (activeView) => set({ activeView }),
 
-  appendLogLine: (line) =>
+  appendLogLines: (lines) =>
     set((state) => {
-      const next = [...state.logLines, line];
+      const next = [...state.logLines, ...lines];
       const limit = state.settings.maxLogLines || 5000;
       // Rolling buffer — drop oldest entries when over the limit
       return { logLines: next.length > limit ? next.slice(next.length - limit) : next };

@@ -12,7 +12,7 @@ import type { LogLine } from "../types";
  */
 export function useLogcat() {
   const selectedDevice = useAppStore((s) => s.selectedSerial);
-  const appendLogLine = useAppStore((s) => s.appendLogLine);
+  const appendLogLines = useAppStore((s) => s.appendLogLines);
   const logcatArgs = useAppStore((s) => s.logcatArgs);
   const clearLogs = useAppStore((s) => s.clearLogs);
   const isRunning = useAppStore((s) => s.isLogcatRunning);
@@ -83,9 +83,10 @@ export function useLogcat() {
       return;
     }
 
-    const unlistenLine = listen<LogLine>("logcat-line", (event) => {
-      if (event.payload.deviceId === selectedDevice) {
-        appendLogLine(event.payload);
+    const unlistenLines = listen<LogLine[]>("logcat-lines", (event) => {
+      // Assuming all lines in a batch belong to the same device
+      if (event.payload.length > 0 && event.payload[0].deviceId === selectedDevice) {
+        appendLogLines(event.payload);
       }
     });
 
@@ -97,10 +98,10 @@ export function useLogcat() {
     });
 
     return () => {
-      unlistenLine.then((f) => f());
+      unlistenLines.then((f) => f());
       unlistenStopped.then((f) => f());
     };
-  }, [selectedDevice, appendLogLine, setIsRunning]);
+  }, [selectedDevice, appendLogLines, setIsRunning]);
 
   return { isRunning, startLogcat, stopLogcat };
 }

@@ -6,7 +6,9 @@ import {
   BatteryCharging,
   Wifi,
   Square,
+  Smartphone,
 } from "lucide-react";
+import { VrHeadset } from "../icons/VrHeadset";
 import { useAppStore } from "../../store/useAppStore";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
@@ -112,7 +114,11 @@ export function DeviceTopBar() {
               flexShrink: 0,
             }}
           >
-            <Cpu size={14} color="var(--color-accent)" strokeWidth={1.8} />
+            {/quest|pico|vive|focus/i.test(device.model || "") ? (
+              <VrHeadset size={14} color="var(--color-accent)" strokeWidth={1.8} />
+            ) : (
+              <Smartphone size={14} color="var(--color-accent)" strokeWidth={1.8} />
+            )}
           </div>
 
           {/* Model + status */}

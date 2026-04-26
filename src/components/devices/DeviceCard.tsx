@@ -1,4 +1,5 @@
-import { BatteryMedium, Usb, Wifi } from "lucide-react";
+import { BatteryMedium, Usb, Wifi, Smartphone } from "lucide-react";
+import { VrHeadset } from "../icons/VrHeadset";
 import type { Device } from "../../types";
 
 interface DeviceCardProps {
@@ -62,7 +63,11 @@ export function DeviceCard({ device, isSelected, onSelect }: DeviceCardProps) {
             position: "relative",
           }}
         >
-          🥽
+          {/quest|pico|vive|focus/i.test(device.model) ? (
+            <VrHeadset size={20} strokeWidth={1.8} color={isSelected ? "var(--color-accent)" : "var(--color-text-secondary)"} />
+          ) : (
+            <Smartphone size={20} strokeWidth={1.8} color={isSelected ? "var(--color-accent)" : "var(--color-text-secondary)"} />
+          )}
           {device.connectionTypes.includes("WiFi") && (
             <div
               style={{
