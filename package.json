@@ -1,6 +1,8 @@
 {
   "name": "openquest-hub",
-  "private": true,
+  "private": false,
+  "author": "watash1no",
+  "license": "MIT",
   "version": "0.1.0",
   "type": "module",
   "scripts": {

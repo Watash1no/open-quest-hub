@@ -113,4 +113,49 @@ Contributions are welcome! Please open an issue or submit a pull request for any
 
 ---
 
+## 🚀 Installation & First Launch
+
+Since the application is currently not signed with official developer certificates, you might see security warnings on your first launch. This is normal for early-stage open-source projects.
+
+### 🍎 macOS
+1. Download the `.dmg` from the [Releases](https://github.com/Watash1no/openquest_project/releases) page.
+2. Drag **Open Quest Hub** to your **Applications** folder.
+3. **Important:** To launch for the first time, **Right-click** the app icon and select **Open**. When the warning dialog appears, click **Open** again.
+
+### 🪟 Windows
+1. Download the `.exe` or `.msi` from the latest release.
+2. Run the installer. If you see a blue "Windows protected your PC" screen:
+   - Click **More info**.
+   - Click **Run anyway**.
+
+### 🐧 Linux
+1. **Permissions:** To allow the app to access your VR headset via USB, you need to add a udev rule:
+   ```bash
+   echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="2833", MODE="0666", GROUP="plugdev"' | sudo tee /etc/udev/rules.d/51-android.rules
+   sudo udevadm control --reload-rules
+   ```
+2. **AppImage:**
+   - Download the `.AppImage`.
+   - Make it executable: `chmod +x openquest-hub.AppImage`.
+   - Run it!
+3. **Debian/Ubuntu:**
+   - Download the `.deb` and install it: `sudo dpkg -i openquest-hub_*.deb`.
+
+---
+
 *Developed with ❤️ for the VR Community.*
+
+---
+
+<div align="center">
+  <a href="https://buymeacoffee.com/watash1no">
+    <img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee" />
+  </a>
+  <img src="https://img.shields.io/github/license/watash1no/openquest_project?style=for-the-badge" alt="License" />
+</div>
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+
