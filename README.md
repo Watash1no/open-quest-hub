@@ -3,6 +3,10 @@
 **OpenQuest Hub** is a powerful, modern, and cross-platform desktop application designed for seamless management of Meta Quest (and other Android-based) VR headsets. Built with **Tauri**, **Rust**, and **React**, it provides a premium user experience for developers and enthusiasts alike.
 
 
+
+<img width="953" height="1247" alt="image" src="https://github.com/user-attachments/assets/e10b7bcd-5f9d-4166-8c5f-223e602e516e" />
+
+
 ---
 
 ## ✨ Key Features
