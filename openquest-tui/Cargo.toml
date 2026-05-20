@@ -1,0 +1,31 @@
+[package]
+name = "openquest-tui"
+version = "1.0.0"
+edition = "2021"
+description = "Terminal UI for Meta Quest device management"
+authors = ["watash1no"]
+license = "MIT"
+
+[dependencies]
+ratatui = "0.28"
+crossterm = "0.28"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+anyhow = "1"
+thiserror = "1"
+chrono = "0.4"
+directories = "5"
+which = "7"
+dirs = "5"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
