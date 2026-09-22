@@ -1,89 +1,56 @@
-use crate::adb::{run_adb_device, run_adb_device_timeout};
-use crate::models::FileEntry;
+use std::process::Command;
 
-pub async fn list_files(device_id: &str, path: &str) -> Result<Vec<FileEntry>, anyhow::Error> {
-    let output = run_adb_device(device_id, &["shell", &format!("ls -la '{}'", path)]).await?;
+#[derive(Debug, Clone)]
+pub struct FileEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+    pub path: String,
+}
 
-    let mut files = Vec::new();
+pub fn list_files(device_id: &str, path: &str) -> Vec<FileEntry> {
+    let output = Command::new("adb")
+        .args(["-s", device_id, "shell", "ls", "-la", path])
+        .output();
 
-    for line in output.lines().skip(1) {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
+    match output {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            stdout
+                .lines()
+                .skip(1)
+                .filter_map(|l| {
+                    let parts: Vec<&str> = l.split_whitespace().collect();
+                    if parts.len() < 9 { return None; }
+                    let perms = parts[0];
+                    let is_dir = perms.starts_with('d');
+                    let name = parts[8..].join(" ");
+                    if name == "." || name == ".." { return None; }
+                    let sep = if path.ends_with('/') { "" } else { "/" };
+                    let full_path = format!("{}{}{}", path, sep, name);
+                    Some(FileEntry {
+                        name,
+                        is_dir,
+                        size: parts[4].parse().ok(),
+                        path: full_path,
+                    })
+                })
+                .collect()
         }
-
-        // Parse ls -la output
-        // Format: drwxr-xr-x  2 root root 4096 2024-01-01 12:00 filename
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 9 {
-            continue;
-        }
-
-        let perms = parts[0];
-        let name_start = 8;
-        let name = parts[name_start..].join(" ");
-
-        if name == "." || name == ".." {
-            continue;
-        }
-
-        let is_dir = perms.starts_with('d');
-
-        let size_bytes = if !is_dir {
-            parts[4].parse::<u64>().ok()
-        } else {
-            None
-        };
-
-        let modified = if parts.len() >= 9 {
-            Some(format!("{} {}", parts[5], parts[6]))
-        } else {
-            None
-        };
-
-        let full_path = if path.ends_with('/') {
-            format!("{}{}", path, name)
-        } else {
-            format!("{}/{}", path, name)
-        };
-
-        files.push(FileEntry {
-            name,
-            path: full_path,
-            is_dir,
-            size_bytes,
-            modified,
-        });
+        _ => Vec::new(),
     }
-
-    // Sort: directories first, then by name
-    files.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
-    });
-
-    Ok(files)
 }
 
-pub async fn pull_file(device_id: &str, remote_path: &str, local_path: &str) -> Result<(), anyhow::Error> {
-    run_adb_device(device_id, &["pull", remote_path, local_path]).await?;
-    Ok(())
-}
 
-pub async fn push_file(device_id: &str, local_path: &str, remote_path: &str) -> Result<(), anyhow::Error> {
-    run_adb_device(device_id, &["push", local_path, remote_path]).await?;
-    Ok(())
-}
+pub fn pull_file(device_id: &str, remote: &str, local: &str) -> Result<(), String> {
+    let output = Command::new("adb")
+        .args(["-s", device_id, "pull", remote, local])
+        .output()
+        .map_err(|e| e.to_string())?;
 
-pub async fn delete_file(device_id: &str, path: &str) -> Result<(), anyhow::Error> {
-    run_adb_device(device_id, &["shell", &format!("rm -rf '{}'", path)]).await?;
-    Ok(())
-}
-
-pub async fn create_directory(device_id: &str, path: &str) -> Result<(), anyhow::Error> {
-    run_adb_device(device_id, &["shell", &format!("mkdir -p '{}'", path)]).await?;
-    Ok(())
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
 }

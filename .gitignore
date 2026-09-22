@@ -31,3 +31,9 @@ builds
 # Documents
 docs/
 documents/
+
+# TUI build artifacts
+openquest-tui/target
+
+# Local test builds (APK/OBB)
+test build/

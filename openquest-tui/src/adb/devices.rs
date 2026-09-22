@@ -1,116 +1,239 @@
-use crate::adb::{run_adb, run_adb_device_timeout, find_adb};
-use crate::models::{ConnectionType, Device, DeviceStatus};
+use std::process::Command;
 
-fn parse_device_line(line: &str) -> Option<(String, DeviceStatus, Option<String>)> {
-    let line = line.trim();
-    if line.is_empty() || line.starts_with("List of devices") {
-        return None;
-    }
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DeviceStatus {
+    Online,
+    Unauthorized,
+    Offline,
+}
 
-    let mut words = line.split_whitespace();
-    let serial = words.next()?.to_string();
-    let status_word = words.next()?;
-    let status = DeviceStatus::from_adb_str(status_word);
-
-    let mut model = None;
-    for word in words {
-        if let Some(m) = word.strip_prefix("model:") {
-            model = Some(m.to_string());
-            break;
+impl DeviceStatus {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "device" => DeviceStatus::Online,
+            "unauthorized" => DeviceStatus::Unauthorized,
+            _ => DeviceStatus::Offline,
         }
     }
 
-    Some((serial, status, model))
-}
-
-fn connection_type(serial: &str) -> ConnectionType {
-    if serial.contains(':') {
-        ConnectionType::WiFi
-    } else {
-        ConnectionType::USB
+    #[allow(dead_code)]
+    pub fn label(&self) -> &str {
+        match self {
+            DeviceStatus::Online => "online",
+            DeviceStatus::Unauthorized => "unauthorized",
+            DeviceStatus::Offline => "offline",
+        }
     }
 }
 
-pub async fn list_devices() -> Result<Vec<Device>, anyhow::Error> {
-    let output = run_adb(&["devices", "-l"]).await?;
+#[derive(Debug, Clone)]
+pub struct Device {
+    pub id: String,
+    pub name: String,
+    pub status: DeviceStatus,
+    pub model: Option<String>,
+    pub android_version: Option<String>,
+    pub serial: Option<String>,
+    pub battery_level: i32,
+    pub controller_battery_left: Option<i32>,
+    pub controller_battery_right: Option<i32>,
+    pub ip_address: Option<String>,
+    pub connection_types: Vec<String>,
+}
 
-    let mut devices = Vec::new();
+struct DeviceInfo {
+    model: Option<String>,
+    android_version: Option<String>,
+    serial: Option<String>,
+    battery_level: i32,
+    controller_battery_left: Option<i32>,
+    controller_battery_right: Option<i32>,
+    ip_address: Option<String>,
+}
 
-    for line in output.lines() {
-        if let Some((id, status, model_from_l)) = parse_device_line(line) {
-            let conn = connection_type(&id);
+pub fn list_devices() -> Vec<Device> {
+    let output = Command::new("adb").args(["devices", "-l"]).output();
 
-            if status == DeviceStatus::Offline && conn == ConnectionType::WiFi {
-                let _ = run_adb(&["disconnect", &id]).await;
-                continue;
+    match output {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            let mut raw_devices = Vec::new();
+
+            for l in stdout.lines().skip(1) {
+                let l = l.trim();
+                if l.is_empty() { continue; }
+                let parts: Vec<&str> = l.split_whitespace().collect();
+                if parts.len() < 2 { continue; }
+                let id = parts[0].to_string();
+                let status_str = parts[1];
+                let status = DeviceStatus::from_str(status_str);
+                raw_devices.push((id, status));
             }
 
-            let model = model_from_l.unwrap_or_else(|| "Unknown".to_string());
+            let mut devices_map = std::collections::HashMap::new();
 
-            // Fetch basic info async
-            let device_id = id.clone();
-            let device_status = status;
-            let device_conn = conn;
-            let device_model = model.clone();
+            for (id, status) in raw_devices {
+                let conn = if id.contains(':') { "WiFi".to_string() } else { "USB".to_string() };
 
-            // Create basic device
-            devices.push(Device {
-                id: device_id.clone(),
-                serial: device_id.clone(),
-                model: device_model,
-                android_version: "Loading...".to_string(),
-                battery_level: None,
-                controller_battery_left: None,
-                controller_battery_right: None,
-                connection_types: vec![device_conn],
-                status: device_status,
-            });
+                let info = if status == DeviceStatus::Online {
+                    get_device_info(&id)
+                } else {
+                    DeviceInfo {
+                        model: None,
+                        android_version: None,
+                        serial: None,
+                        battery_level: -1,
+                        controller_battery_left: None,
+                        controller_battery_right: None,
+                        ip_address: None,
+                    }
+                };
+
+                let serial = info.serial.clone().unwrap_or_else(|| id.clone());
+                let model = info.model.clone();
+
+                let entry = devices_map.entry(serial.clone()).or_insert_with(|| {
+                    let name = model.clone().unwrap_or_else(|| id.clone());
+                    Device {
+                        id: id.clone(),
+                        name,
+                        status,
+                        model,
+                        android_version: info.android_version.clone(),
+                        serial: Some(serial.clone()),
+                        battery_level: info.battery_level,
+                        controller_battery_left: info.controller_battery_left,
+                        controller_battery_right: info.controller_battery_right,
+                        ip_address: info.ip_address.clone(),
+                        connection_types: Vec::new(),
+                    }
+                });
+
+                if !entry.connection_types.contains(&conn) {
+                    entry.connection_types.push(conn);
+                }
+
+                if status == DeviceStatus::Online {
+                    entry.id = id;
+                    entry.status = DeviceStatus::Online;
+                    if entry.android_version.is_none() {
+                        entry.android_version = info.android_version;
+                    }
+                    if entry.battery_level == -1 {
+                        entry.battery_level = info.battery_level;
+                    }
+                    if entry.ip_address.is_none() {
+                        entry.ip_address = info.ip_address;
+                    }
+                    if entry.controller_battery_left.is_none() {
+                        entry.controller_battery_left = info.controller_battery_left;
+                    }
+                    if entry.controller_battery_right.is_none() {
+                        entry.controller_battery_right = info.controller_battery_right;
+                    }
+                }
+            }
+
+            devices_map.into_values().collect()
         }
+        _ => Vec::new(),
     }
-
-    Ok(devices)
 }
 
-pub async fn fetch_device_info(device_id: &str) -> Result<(String, String, i32, Option<i32>, Option<i32>), anyhow::Error> {
-    let raw = run_adb_device_timeout(
-        device_id,
-        &["shell",
-          "(echo MODEL:$(getprop ro.product.model)) 2>/dev/null; (echo ANDROID:$(getprop ro.build.version.release)) 2>/dev/null; (dumpsys battery | grep level:) 2>/dev/null; true"],
-        std::time::Duration::from_secs(2),
-    ).await?;
+fn get_device_info(device_id: &str) -> DeviceInfo {
+    let cmd = format!(
+        "(echo MODEL:$(getprop ro.product.model)) 2>/dev/null; \
+         (echo ANDROID:$(getprop ro.build.version.release)) 2>/dev/null; \
+         (echo SERIAL:$(getprop ro.serialno)) 2>/dev/null; \
+         (dumpsys battery | grep level:) 2>/dev/null; \
+         (dumpsys OVRRemoteService | grep Paired) 2>/dev/null; \
+         (dumpsys pvr_service | grep -i battery) 2>/dev/null; \
+         (ip route) 2>/dev/null; \
+         (ip addr show wlan0) 2>/dev/null; \
+         (ifconfig wlan0) 2>/dev/null; \
+         true"
+    );
 
-    let mut model = String::from("Unknown");
-    let mut android_version = String::from("Unknown");
-    let mut battery_level: i32 = -1;
+    let output = Command::new("adb")
+        .args(["-s", device_id, "shell", &cmd])
+        .output();
 
-    for line in raw.lines() {
-        let line = line.trim();
-        if let Some(v) = line.strip_prefix("MODEL:") {
-            if !v.is_empty() { model = v.to_string(); }
-        } else if let Some(v) = line.strip_prefix("ANDROID:") {
-            if !v.is_empty() { android_version = v.to_string(); }
-        } else if line.to_lowercase().contains("level:") {
-            if let Some(val) = extract_battery_value(line) {
-                battery_level = val;
+    let mut info = DeviceInfo {
+        model: None,
+        android_version: None,
+        serial: None,
+        battery_level: -1,
+        controller_battery_left: None,
+        controller_battery_right: None,
+        ip_address: None,
+    };
+
+    if let Ok(o) = output {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        for line in stdout.lines() {
+            let line = line.trim();
+            let lower = line.to_lowercase();
+            if let Some(v) = line.strip_prefix("MODEL:") {
+                let v = v.trim();
+                if !v.is_empty() { info.model = Some(v.to_string()); }
+            } else if let Some(v) = line.strip_prefix("ANDROID:") {
+                let v = v.trim();
+                if !v.is_empty() { info.android_version = Some(v.to_string()); }
+            } else if let Some(v) = line.strip_prefix("SERIAL:") {
+                let v = v.trim();
+                if !v.is_empty() { info.serial = Some(v.to_string()); }
+            } else if lower.contains("level:") && !lower.contains("type:") && !lower.contains("paired") {
+                if let Some(val) = extract_battery_value(line) {
+                    info.battery_level = val;
+                }
+            } else if lower.contains("battery:") || lower.contains("battery level:") || lower.contains("paired") {
+                let is_left = lower.contains("left") || lower.contains("_l") || lower.contains(".l");
+                let is_right = lower.contains("right") || lower.contains("_r") || lower.contains(".r");
+                if let Some(val) = extract_battery_value(line) {
+                    if is_left { info.controller_battery_left = Some(val); }
+                    else if is_right { info.controller_battery_right = Some(val); }
+                }
+            } else if info.ip_address.is_none() {
+                if line.contains("src ") && line.contains("wlan0") {
+                    if let Some(ip) = line.split("src ").nth(1) {
+                        let ip_clean = ip.split_whitespace().next().unwrap_or("").trim().to_string();
+                        if !ip_clean.is_empty() { info.ip_address = Some(ip_clean); }
+                    }
+                } else if line.contains("inet addr:") {
+                    if let Some(ip) = line.split("inet addr:").nth(1) {
+                        if let Some(ip_clean) = ip.split_whitespace().next() {
+                            let ip_clean = ip_clean.trim().to_string();
+                            if !ip_clean.is_empty() { info.ip_address = Some(ip_clean); }
+                        }
+                    }
+                } else if line.contains("inet ") && (line.contains("wlan0") || lower.contains("scope global") || lower.contains("brd ")) {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    for part in parts {
+                        if part.contains('.') && !part.contains("brd") {
+                            let ip_part = part.split('/').next().unwrap_or("").trim().to_string();
+                            if !ip_part.is_empty() && ip_part != "127.0.0.1" {
+                                info.ip_address = Some(ip_part);
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-
-    Ok((model, android_version, battery_level, None, None))
+    info
 }
 
 fn extract_battery_value(line: &str) -> Option<i32> {
     let lower = line.to_lowercase();
     let markers = ["battery level:", "battery:", "level:"];
     let mut search_area = line;
-
     for marker in markers {
         if let Some(idx) = lower.find(marker) {
             search_area = &line[idx + marker.len()..];
             break;
         }
     }
-
     for part in search_area.split(|c: char| !c.is_numeric()) {
         let part = part.trim();
         if !part.is_empty() {
@@ -122,13 +245,4 @@ fn extract_battery_value(line: &str) -> Option<i32> {
         }
     }
     None
-}
-
-pub async fn get_adb_status() -> Result<(Option<String>, String, Option<String>), anyhow::Error> {
-    let adb_path = find_adb().ok().map(|p| p.to_string_lossy().to_string());
-
-    match run_adb(&["devices", "-l"]).await {
-        Ok(raw_output) => Ok((adb_path, raw_output, None)),
-        Err(e) => Ok((adb_path, String::new(), Some(e.to_string()))),
-    }
 }
