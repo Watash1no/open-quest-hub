@@ -132,6 +132,7 @@ struct LocalFile {
     is_dir: bool,
     full_path: PathBuf,
     is_apk: bool,
+    is_obb: bool,
 }
 
 // ─── App ─────────────────────────────────────────────────────────────────────
@@ -181,7 +182,10 @@ struct App {
 
     // Actions & Dashboard state
     boundary_enabled: bool,
+    #[allow(dead_code)]
     is_recording: bool,
+    #[allow(dead_code)]
+    recording_path: Option<String>,
     recent_media: Vec<FileEntry>,
     selected_media_idx: Option<usize>,
 }
@@ -224,6 +228,7 @@ impl App {
             last_click_idx: None,
             boundary_enabled: true,
             is_recording: false,
+            recording_path: None,
             recent_media: Vec::new(),
             selected_media_idx: None,
         }
@@ -265,7 +270,6 @@ impl App {
                 self.logcat_receiver = Some(adb::start_logcat(&id));
             }
         }
-        self.refresh_recent_media();
     }
 
     fn refresh_recent_media(&mut self) {
@@ -318,6 +322,7 @@ impl App {
                 is_dir: true,
                 full_path: parent.to_path_buf(),
                 is_apk: false,
+                is_obb: false,
             });
         }
 
@@ -334,8 +339,10 @@ impl App {
                 if name.starts_with('.') { continue; }
                 let fp = entry.path();
                 let is_dir = fp.is_dir();
-                let is_apk = name.to_lowercase().ends_with(".apk");
-                entries.push(LocalFile { name, is_dir, full_path: fp, is_apk });
+                let lower = name.to_lowercase();
+                let is_apk = lower.ends_with(".apk");
+                let is_obb = lower.ends_with(".obb");
+                entries.push(LocalFile { name, is_dir, full_path: fp, is_apk, is_obb });
             }
         }
 
@@ -482,7 +489,7 @@ impl App {
             View::Install => {
                 if let Some(idx) = self.local_file_state.selected() {
                     if let Some(f) = self.local_files.get(idx) {
-                        if f.is_apk {
+                        if !f.is_dir {
                             if self.selected_local.contains(&idx) {
                                 self.selected_local.remove(&idx);
                             } else {
@@ -622,17 +629,75 @@ impl App {
     // ─── Install APKs ─────────────────────────────────────────────────────────
 
     fn install_selected_apks(&mut self) {
-        let paths: Vec<String> = self.selected_local.iter()
+        let id = match self.selected_device_id() {
+            Some(id) => id,
+            None => { self.notify("No device selected"); return; }
+        };
+
+        let apk_paths: Vec<String> = self.selected_local.iter()
             .filter_map(|&i| self.local_files.get(i))
-            .filter(|f| f.is_apk)
+            .filter(|f| !f.is_dir && f.is_apk)
             .map(|f| f.full_path.to_string_lossy().to_string())
             .collect();
-        if paths.is_empty() {
-            self.notify("No APKs selected — use Space to select .apk files");
+
+        let obb_entries: Vec<(String, String)> = self.selected_local.iter()
+            .filter_map(|&i| self.local_files.get(i))
+            .filter(|f| !f.is_dir && f.is_obb)
+            .map(|f| (f.full_path.to_string_lossy().to_string(), f.name.clone()))
+            .collect();
+
+        if apk_paths.is_empty() && obb_entries.is_empty() {
+            self.notify("No APKs or OBBs selected — use Space to select");
             return;
         }
-        self.install_apks(paths);
+
+        // APKs — delegate to existing install_apks (signature untouched).
+        if !apk_paths.is_empty() {
+            self.install_apks(apk_paths);
+        }
+
+        let obb_results: Vec<String> = if !obb_entries.is_empty() {
+            obb_entries.iter().map(|(local, name)| {
+                let pkg = match parse_obb_package(name) {
+                    Some(p) => p,
+                    None => return format!("{} → parse-fail", name),
+                };
+                let dest_dir = format!("/sdcard/Android/obb/{}", pkg);
+                let mkdir_ok = std::process::Command::new("adb")
+                    .args(["-s", &id, "shell", "mkdir", "-p", &dest_dir])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !mkdir_ok {
+                    return format!("{} → mkdir-fail", name);
+                }
+                let dest = format!("{}/", dest_dir);
+                let push_ok = std::process::Command::new("adb")
+                    .args(["-s", &id, "push", local, &dest])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                let label = if push_ok { "OK" } else { "fail" };
+                format!("{} → {}/ ({})", name, dest_dir, label)
+            }).collect()
+        } else {
+            Vec::new()
+        };
+
         self.selected_local.clear();
+
+        if !obb_results.is_empty() {
+            let obb_msg = format!("OBB pushed: {}", obb_results.join(", "));
+            // If install_apks already notified an install summary, combine it.
+            if let Some(existing) = self.notification.clone() {
+                if existing.contains("Install done") {
+                    let combined = format!("{}; {}", existing, obb_msg);
+                    self.notify(combined);
+                    return;
+                }
+            }
+            self.notify(obb_msg);
+        }
     }
 
     fn push_selected_files(&mut self) {
@@ -738,7 +803,10 @@ impl App {
                 }
             }
             KeyCode::Char('r') => match self.view {
-                View::Devices => self.refresh_devices(),
+                View::Devices => {
+                    self.refresh_devices();
+                    self.refresh_recent_media();
+                }
                 View::Apps => self.refresh_apps(),
                 View::Files => self.refresh_files(),
                 View::Install => self.refresh_local_files(),
@@ -882,25 +950,7 @@ impl App {
                 }
             }
             KeyCode::Char('v') => {
-                if self.view == View::Devices {
-                    if let Some(id) = self.selected_device_id() {
-                        self.is_recording = !self.is_recording;
-                        match adb::record_video(&id, self.is_recording) {
-                            Ok(res) => {
-                                if self.is_recording {
-                                    self.notify("Recording started... press v again to stop");
-                                } else {
-                                    self.notify(res);
-                                    self.refresh_recent_media();
-                                }
-                            }
-                            Err(e) => {
-                                self.is_recording = false;
-                                self.notify(format!("Failed: {}", e));
-                            }
-                        }
-                    }
-                }
+                // TODO: re-enable video recording once Quest 3 screenrecord issues are resolved.
             }
             KeyCode::Char('[') => {
                 if self.view == View::Devices && !self.recent_media.is_empty() {
@@ -1309,8 +1359,8 @@ impl App {
                 }
                 View::Install => {
                     let n = self.selected_local.len();
-                    if n > 0 { format!("  [{}] APK(s) selected — i:install  a:select-all", n) }
-                    else { " Space:select-apk  i:install  Enter:open-dir  r:refresh  ?:help  q:quit".to_string() }
+                    if n > 0 { format!("  [{}] file(s) selected — i:install+pobb  a:select-all", n) }
+                    else { " Space:select  i:install  Enter:open-dir  r:refresh  ?:help  q:quit".to_string() }
                 }
                 _ => " click/scroll:mouse  Tab:tabs  r:refresh  ?:help  q:quit".to_string(),
             };
@@ -1446,16 +1496,35 @@ impl App {
                             Span::styled(check, Style::default().fg(check_col)),
                             Span::styled(f.name.as_str(), Style::default().fg(name_col)),
                         ]))
-                    } else {
-                        // Non-APK file — grayed out
+                    } else if f.is_obb {
+                        let is_sel = sel.contains(&i);
+                        let (check, check_col) = if is_sel {
+                            ("[✓] ", Color::Magenta)
+                        } else {
+                            ("[⇡] ", Color::Magenta)
+                        };
+                        let name_col = if is_sel { Color::Magenta } else { Color::Magenta };
                         ListItem::new(Line::from(vec![
-                            Span::styled("    ", Style::default()),
-                            Span::styled(f.name.as_str(), Style::default().fg(Color::DarkGray)),
+                            Span::styled(check, Style::default().fg(check_col).add_modifier(Modifier::BOLD)),
+                            Span::styled(f.name.as_str(), Style::default().fg(name_col)),
+                        ]))
+                    } else {
+                        let is_sel = sel.contains(&i);
+                        let (check, check_col) = if is_sel {
+                            ("[✓] ", Color::White)
+                        } else {
+                            ("[ ] ", Color::DarkGray)
+                        };
+                        let name_col = if is_sel { Color::White } else { Color::DarkGray };
+                        ListItem::new(Line::from(vec![
+                            Span::styled(check, Style::default().fg(check_col)),
+                            Span::styled(f.name.as_str(), Style::default().fg(name_col)),
                         ]))
                     }
                 }).collect();
                 let apk_count = self.local_files.iter().filter(|f| f.is_apk).count();
-                let title = format!(" Install APK  ({} APKs in dir) ", apk_count);
+                let obb_count = self.local_files.iter().filter(|f| f.is_obb).count();
+                let title = format!(" Install APK + OBB  ({} APKs, {} OBBs in dir) ", apk_count, obb_count);
                 let list = List::new(items)
                     .block(Block::default().borders(Borders::ALL).title(title))
                     .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
@@ -1908,6 +1977,23 @@ fn format_bytes(b: u64) -> String {
     else if b >= MB { format!("{:.1}M", b as f64 / MB as f64) }
     else if b >= KB { format!("{:.0}K", b as f64 / KB as f64) }
     else { format!("{}B", b) }
+}
+
+/// Parse the Android package name from a standard OBB filename.
+///
+/// OBB naming convention: `<main|patch>.<versionCode>.<packageName>.obb`.
+/// Returns `None` if the filename does not match the convention.
+fn parse_obb_package(filename: &str) -> Option<String> {
+    if filename.len() < 4 || !filename.to_lowercase().ends_with(".obb") {
+        return None;
+    }
+    let stem = &filename[..filename.len() - 4];
+    let parts: Vec<&str> = stem.split('.').collect();
+    if parts.len() < 4 {
+        return None;
+    }
+    let pkg = parts[2..].join(".");
+    if pkg.is_empty() { None } else { Some(pkg) }
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────

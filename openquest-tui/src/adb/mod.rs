@@ -10,5 +10,5 @@ pub use files::{FileEntry, list_files, pull_file};
 pub use logcat::{start_logcat, clear_logcat};
 pub use controls::{
     toggle_boundary, enable_wifi_adb, disable_wifi_adb, setup_wireless_adb,
-    take_screenshot, record_video, list_remote_media, delete_remote_media, open_remote_media
+    take_screenshot, list_remote_media, delete_remote_media, open_remote_media
 };
