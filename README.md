@@ -20,6 +20,17 @@
 - **⚙️ Deep Configuration:** Automated utility installation (Scrcpy, ADB), persistent settings for custom paths, and log buffer management.
 - **🎨 Premium UI:** Modern, frameless design with custom animations, glassmorphism effects, and smooth view transitions.
 
+### 🖥️ Terminal UI (TUI)
+
+For headless setups, SSH sessions, and keyboard-driven workflows, a standalone Rust terminal app ships in [`openquest-tui/`](openquest-tui/README.md).
+
+- **Pure terminal, no GUI required.** Built with Ratatui 0.28 and Crossterm 0.28; the same ADB commands as the desktop app, reimplemented for the terminal.
+- **Six tabs, keyboard-first navigation.** Devices, Apps, Files, Install, Logcat, Settings — switch with `Tab` / `Shift+Tab`, press `?` for the help overlay.
+- **Install APKs and push OBBs in one keypress.** The Install tab detects `.obb` files, parses the package name out of the filename, and pushes to `/sdcard/Android/obb/<pkg>/` automatically.
+- **Mouse support included.** Click tabs, toggle file checkboxes, double-click to activate, scroll to navigate — all work alongside the hotkeys.
+
+Build it from the `openquest-tui/` directory with `cargo build --release` and run `./target/release/openquest-tui`. See [openquest-tui/README.md](openquest-tui/README.md) for the full hotkey reference and Quest 3 quirks.
+
 ---
 
 ## 🛠 Tech Stack
@@ -79,6 +90,31 @@ To ensure **OpenQuest Hub** works correctly, your device must be properly config
    sudo dpkg -i openquest-hub_*.deb
    ```
 
+#### 🖥️ Terminal UI (TUI)
+
+A standalone Rust TUI binary ships in every release alongside the GUI. It uses the same ADB commands and is perfect for headless setups, SSH sessions, or anyone who prefers the terminal.
+
+| Platform | Asset |
+| --- | --- |
+| Linux x86_64 | `openquest-tui-linux-x86_64` |
+| macOS (Apple Silicon) | `openquest-tui-macos-aarch64` |
+| Windows x86_64 | `openquest-tui-windows-x86_64.exe` |
+
+Download the asset for your platform from the [Releases](https://github.com/Watash1no/open-quest-hub/releases) page, then:
+
+```bash
+# Linux / macOS
+chmod +x openquest-tui-linux-x86_64   # or openquest-tui-macos-aarch64
+./openquest-tui-linux-x86_64
+```
+
+```powershell
+# Windows
+.\openquest-tui-windows-x86_64.exe
+```
+
+For the full hotkey reference and Quest 3 quirks, see [openquest-tui/README.md](openquest-tui/README.md).
+
 ---
 
 ## 👨‍💻 Development
@@ -105,6 +141,15 @@ If you want to build the project from source:
    ```bash
    npm run tauri build
    ```
+
+5. **Build the TUI binary** (optional, no Node/Tauri needed):
+   ```bash
+   cd openquest-tui
+   cargo build --release
+   ./target/release/openquest-tui
+   ```
+
+The TUI is a standalone Rust crate. See [openquest-tui/README.md](openquest-tui/README.md) for details.
 
 ---
 
