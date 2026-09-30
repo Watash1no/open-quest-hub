@@ -6,16 +6,18 @@ pub struct FileEntry {
     pub is_dir: bool,
     pub size: Option<u64>,
     pub path: String,
+    pub mod_time: String,
 }
 
 pub fn list_files(device_id: &str, path: &str) -> Vec<FileEntry> {
     // Trailing slash forces symlink dereference (e.g. /sdcard -> /storage/self/primary).
+    // -t sorts newest-first on the device so we don't have to parse dates here.
     let path_arg = if path.ends_with('/') { path.to_string() } else { format!("{}/", path) };
     let output = Command::new("adb")
-        .args(["-s", device_id, "shell", "ls", "-la", &path_arg])
+        .args(["-s", device_id, "shell", "ls", "-la", "-t", &path_arg])
         .output();
 
-    match output {
+    let mut entries: Vec<FileEntry> = match output {
         Ok(o) if o.status.success() => {
             let stdout = String::from_utf8_lossy(&o.stdout);
             stdout
@@ -29,6 +31,7 @@ pub fn list_files(device_id: &str, path: &str) -> Vec<FileEntry> {
                     if perms.starts_with('l') { return None; }
                     let is_dir = perms.starts_with('d');
                     let size = parts[4].parse().ok();
+                    let mod_time = format!("{} {}", parts[5], parts[6]);
                     let name = if parts[7].contains(":object_r:") {
                         if parts.len() < 9 { return None; }
                         parts[8..].join(" ")
@@ -47,12 +50,30 @@ pub fn list_files(device_id: &str, path: &str) -> Vec<FileEntry> {
                         is_dir,
                         size,
                         path: full_path,
+                        mod_time,
                     })
                 })
                 .collect()
         }
         _ => Vec::new(),
-    }
+    };
+
+    // Directories first (alphabetical), then files (newest-first by mtime).
+    entries.sort_by(|a, b| {
+        match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            (true, true) => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            (false, false) => {
+                // Newest first; ties broken by name for stability.
+                match b.mod_time.cmp(&a.mod_time) {
+                    std::cmp::Ordering::Equal => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                    other => other,
+                }
+            }
+        }
+    });
+    entries
 }
 
 

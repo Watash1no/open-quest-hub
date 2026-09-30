@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
 use crate::adb::files::{FileEntry, list_files, pull_file};
@@ -125,12 +126,12 @@ pub fn setup_wireless_adb(device_id: &str) -> Result<String, String> {
     }
 }
 
-pub fn take_screenshot(device_id: &str) -> Result<String, String> {
+pub fn take_screenshot(device_id: &str, save_dir: &Path) -> Result<String, String> {
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
+
     let _ = Command::new("adb")
         .args(["-s", device_id, "shell", "mkdir", "-p", "/sdcard/Pictures/Screenshots"])
         .status();
@@ -169,11 +170,12 @@ pub fn take_screenshot(device_id: &str) -> Result<String, String> {
         Some(_) => {}
     }
 
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let local_path = format!("{}/Downloads/screenshot_{}.png", home, timestamp);
-    pull_file(device_id, &remote_path, &local_path)?;
+    std::fs::create_dir_all(save_dir).map_err(|e| e.to_string())?;
+    let local_path = save_dir.join(format!("screenshot_{}.png", timestamp));
+    let local_path_str = local_path.to_string_lossy().into_owned();
+    pull_file(device_id, &remote_path, &local_path_str)?;
 
-    Ok(local_path)
+    Ok(local_path_str)
 }
 
 #[allow(dead_code)]
@@ -280,6 +282,13 @@ pub fn record_video(device_id: &str, start: bool, known_remote_path: Option<Stri
     }
 }
 
+/// Discover media files on the device.
+///
+/// Scans a curated set of Quest / Android media directories first, then falls
+/// back to a depth-limited `find` over `/sdcard` so anything captured outside
+/// the usual screenshot / movie dirs still shows up. Results are sorted by
+/// modification time (newest first) so the gallery always reflects the most
+/// recent captures without needing to parse dates on the host.
 pub fn list_remote_media(device_id: &str) -> Vec<FileEntry> {
     let paths = vec![
         "/sdcard/Oculus/Screenshots/",
@@ -288,7 +297,10 @@ pub fn list_remote_media(device_id: &str) -> Vec<FileEntry> {
         "/sdcard/DCIM/Screenshots/",
         "/sdcard/Pictures/",
         "/sdcard/DCIM/",
+        "/sdcard/DCIM/Camera/",
         "/sdcard/Movies/",
+        "/sdcard/Movies/QuestCaptures/",
+        "/sdcard/Oculus/",
     ];
 
     let mut all_media = Vec::new();
@@ -297,25 +309,87 @@ pub fn list_remote_media(device_id: &str) -> Vec<FileEntry> {
         let files = list_files(device_id, path);
         for entry in files {
             let name_lower = entry.name.to_lowercase();
-            if name_lower.ends_with(".png") ||
-               name_lower.ends_with(".jpg") ||
-               name_lower.ends_with(".jpeg") ||
-               name_lower.ends_with(".mp4") ||
-               name_lower.ends_with(".webm") {
+            if is_media_name(&name_lower) {
                 all_media.push(entry);
             }
         }
     }
 
-    // Sort by name descending (since files usually have timestamp naming, newest will be first)
-    all_media.sort_by(|a, b| b.name.cmp(&a.name));
-    
-    // Deduplicate
+    if let Some(found) = find_recent_media(device_id) {
+        for entry in found {
+            all_media.push(entry);
+        }
+    }
+
     let mut seen = std::collections::HashSet::new();
     all_media.retain(|item| seen.insert(item.path.clone()));
 
-    all_media.truncate(10);
+    // Newest-first. `mod_time` for `ls -la -t` results is "Mmm DD" or "Mmm DD HH:MM";
+    // for `find` results it's padded epoch seconds — both sort chronologically as
+    // strings here.
+    all_media.sort_by(|a, b| match b.mod_time.cmp(&a.mod_time) {
+        std::cmp::Ordering::Equal => b.name.cmp(&a.name),
+        other => other,
+    });
+
+    all_media.truncate(20);
     all_media
+}
+
+fn is_media_name(lower: &str) -> bool {
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".mp4")
+        || lower.ends_with(".webm")
+        || lower.ends_with(".mov")
+        || lower.ends_with(".m4v")
+}
+
+fn find_recent_media(device_id: &str) -> Option<Vec<FileEntry>> {
+    let shell_cmd = "find /sdcard -type f \\( -iname '*.mp4' -o -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webm' -o -iname '*.mov' -o -iname '*.m4v' \\) -maxdepth 5 -printf '%T@ %s %p\\n' 2>/dev/null | sort -rn | head -n 200";
+    let output = Command::new("adb")
+        .args(["-s", device_id, "shell", shell_cmd])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut entries = Vec::new();
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let epoch: f64 = parts[0].parse().unwrap_or(0.0);
+        let size: u64 = parts[1].parse().unwrap_or(0);
+        let full_path = parts[2].trim().to_string();
+        if full_path.is_empty() {
+            continue;
+        }
+        let name = full_path.rsplit('/').next().unwrap_or(&full_path).to_string();
+        entries.push(FileEntry {
+            name,
+            is_dir: false,
+            size: Some(size),
+            path: full_path,
+            mod_time: format_epoch_mod_time(epoch),
+        });
+    }
+
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
+}
+
+/// Epoch-seconds padded to a fixed width so lexical sort matches chronological.
+fn format_epoch_mod_time(epoch: f64) -> String {
+    format!("{:014}", epoch as u64)
 }
 
 pub fn delete_remote_media(device_id: &str, path: &str) -> Result<(), String> {
@@ -340,11 +414,19 @@ pub fn open_remote_media(device_id: &str, path: &str) -> Result<(), String> {
     // Pull
     pull_file(device_id, path, &local_path_str)?;
 
-    // Open natively on macOS using 'open'
-    let output = Command::new("open")
-        .arg(&local_path_str)
-        .output()
-        .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    let mut cmd = Command::new("open");
+    #[cfg(target_os = "linux")]
+    let mut cmd = Command::new("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = Command::new("cmd");
+
+    #[cfg(target_os = "windows")]
+    cmd.args(["/c", "start", "", &local_path_str]);
+    #[cfg(not(target_os = "windows"))]
+    cmd.arg(&local_path_str);
+
+    let output = cmd.output().map_err(|e| e.to_string())?;
 
     if output.status.success() {
         Ok(())

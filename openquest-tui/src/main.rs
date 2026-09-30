@@ -15,6 +15,99 @@ use std::time::{Duration, Instant};
 mod adb;
 use adb::{AppInfo, Device, DeviceStatus, FileEntry};
 
+// ─── Config ──────────────────────────────────────────────────────────────────
+
+/// User-tunable settings, persisted to ~/.config/openquest-tui/config.json.
+#[derive(Clone, Debug)]
+struct Config {
+    media_save_dir: PathBuf,
+    log_save_dir: PathBuf,
+    logcat_filter: String,
+}
+
+impl Config {
+    fn default() -> Self {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        Self {
+            media_save_dir: PathBuf::from(format!("{}/Downloads", home)),
+            log_save_dir: PathBuf::from(format!("{}/Downloads/openquest-logs", home)),
+            logcat_filter: String::new(),
+        }
+    }
+
+    fn config_path() -> PathBuf {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        PathBuf::from(format!("{}/.config/openquest-tui/config.json", home))
+    }
+
+    fn load() -> Self {
+        let mut config = Self::default();
+        let path = Self::config_path();
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            return config;
+        };
+        // Minimal hand-rolled JSON reader — keeps the dep list to ratatui/crossterm/anyhow.
+        for line in content.lines() {
+            let line = line.trim();
+            if !line.starts_with('"') { continue; }
+            let Some(colon) = line.find(':') else { continue; };
+            let key = line[..colon].trim().trim_matches(',').trim_matches('"');
+            let rest = line[colon + 1..].trim().trim_end_matches(',').trim_end_matches('}');
+            let value = rest.trim().trim_matches('"').to_string();
+            match key {
+                "media_save_dir" if !value.is_empty() => {
+                    config.media_save_dir = PathBuf::from(value);
+                }
+                "log_save_dir" if !value.is_empty() => {
+                    config.log_save_dir = PathBuf::from(value);
+                }
+                "logcat_filter" => {
+                    config.logcat_filter = value;
+                }
+                _ => {}
+            }
+        }
+        config
+    }
+
+    fn save(&self) -> Result<(), String> {
+        let path = Self::config_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let body = format!(
+            "{{\n  \"media_save_dir\": \"{}\",\n  \"log_save_dir\": \"{}\",\n  \"logcat_filter\": \"{}\"\n}}\n",
+            json_escape(&self.media_save_dir.to_string_lossy()),
+            json_escape(&self.log_save_dir.to_string_lossy()),
+            json_escape(&self.logcat_filter),
+        );
+        std::fs::write(&path, body).map_err(|e| e.to_string())
+    }
+}
+
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Drop the last character from a path string in a char-boundary-safe way.
+fn truncate_path_backspace(s: &str) -> String {
+    let mut end = s.len();
+    if end == 0 {
+        return s.to_string();
+    }
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end == 0 {
+        return s.to_string();
+    }
+    end -= 1;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
+}
+
 // ─── Banner ──────────────────────────────────────────────────────────────────
 
 /// Display mode for the top banner row, picked at render time from terminal size.
@@ -43,16 +136,17 @@ impl BannerMode {
         match self {
             BannerMode::Hidden => 0,
             BannerMode::Text => 1,
+            // 4 box lines (no empty padding row) + 1 tagline line
             BannerMode::Art => 5,
         }
     }
 }
 
 const BANNER_OPENQUEST: [&str; 4] = [
-    " ████  ██████ ██████ █    █  ████  █    █ ██████  ████  ██████",
-    "█    █ █    █ █      ██   █ █    █ █    █ █        ██    ██  ",
-    "█    █ ██████ ██████ █ █  █ █    █ █    █ ██████   ███    ██  ",
-    " ████  █      ██████ █  █ █  ████   ████  ██████     ██   ██  ",
+    "+===========================================================+",
+    "|   O P E N   Q U E S T  -  A D B   D E V I C E   T O O L   |",
+    "|   v 0 . 1   ·   m e t a   q u e s t   ·   a n d r o i d   |",
+    "+===========================================================+",
 ];
 
 const VR_HEADSET_ART: [&str; 8] = [
@@ -76,6 +170,54 @@ enum View {
     Install, // Local file picker → adb install
     Logcat,
     Settings,
+}
+
+// ─── Click hit-test ──────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug)]
+enum ClickTarget {
+    Tab(usize),
+    SidebarItem(usize),
+    Checkbox(usize),
+    HelpClose,
+    ConfirmYes,
+    ConfirmNo,
+    WifiToggle,
+    BoundaryToggle,
+    Screenshot,
+    RecordVideo,
+    MediaItem(usize),
+    MediaOpen,
+    MediaDownload,
+    MediaDelete,
+    MediaPrev,
+    MediaNext,
+    AppsLaunch,
+    AppsUninstall,
+    AppsForceStop,
+    FilesDownloadSelected,
+    FilesPullSingle,
+    FilesSelectAll,
+    FilesDelete,
+    FilesGoUp,
+    InstallSelected,
+    InstallPush,
+    InstallSelectAll,
+    LogcatPause,
+    LogcatClear,
+    LogcatRestart,
+    LogcatSave,
+    LogcatFilterField,
+    SettingsMediaField,
+    SettingsLogField,
+    SettingsLogcatFilterField,
+    SettingsSave,
+}
+
+#[derive(Clone, Copy)]
+struct ClickArea {
+    rect: Rect,
+    target: ClickTarget,
 }
 
 // ─── Log level ───────────────────────────────────────────────────────────────
@@ -179,6 +321,7 @@ struct App {
     terminal_size: (u16, u16),
     last_click_time: Option<Instant>,
     last_click_idx: Option<usize>,
+    click_areas: Vec<ClickArea>,
 
     // Actions & Dashboard state
     boundary_enabled: bool,
@@ -188,6 +331,23 @@ struct App {
     recording_path: Option<String>,
     recent_media: Vec<FileEntry>,
     selected_media_idx: Option<usize>,
+
+    // Config + editable settings
+    config: Config,
+    settings_focus: SettingsField,
+    settings_dirty: bool,
+
+    // Logcat editing
+    logcat_filter_input: String,
+    logcat_filter_focused: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SettingsField {
+    None,
+    MediaDir,
+    LogDir,
+    LogcatFilter,
 }
 
 impl App {
@@ -199,6 +359,8 @@ impl App {
         } else {
             home
         };
+        let config = Config::load();
+        let logcat_filter_input = config.logcat_filter.clone();
 
         Self {
             devices: Vec::new(),
@@ -226,11 +388,17 @@ impl App {
             terminal_size: (0, 0),
             last_click_time: None,
             last_click_idx: None,
+            click_areas: Vec::new(),
             boundary_enabled: true,
             is_recording: false,
             recording_path: None,
             recent_media: Vec::new(),
             selected_media_idx: None,
+            config,
+            settings_focus: SettingsField::None,
+            settings_dirty: false,
+            logcat_filter_input,
+            logcat_filter_focused: false,
         }
     }
 
@@ -264,12 +432,10 @@ impl App {
             self.device_state
                 .select(first.or(if self.devices.is_empty() { None } else { Some(0) }));
         }
-        // Auto-start logcat in background as soon as a device is available
-        if self.logcat_receiver.is_none() {
-            if let Some(id) = self.selected_device_id() {
-                self.logcat_receiver = Some(adb::start_logcat(&id));
-            }
-        }
+        // Media refresh is intentionally NOT done here on every poll — the
+        // shell-out to `find /sdcard` was freezing the UI on Quest 3. It runs
+        // once in `main()` after the first `refresh_devices` and otherwise on
+        // `r` press or device selection change.
     }
 
     fn refresh_recent_media(&mut self) {
@@ -356,7 +522,8 @@ impl App {
             self.log_lines.clear();
             self.logcat_offset = 0;
             self.logcat_auto_scroll = true;
-            self.logcat_receiver = Some(adb::start_logcat(&id));
+            let args = adb::split_filter_args(&self.logcat_filter_input);
+            self.logcat_receiver = Some(adb::start_logcat(&id, &args));
             self.notify("Logcat stream (re)started");
         }
     }
@@ -383,10 +550,13 @@ impl App {
 
     fn device_changed(&mut self) {
         self.refresh_recent_media();
-        if let Some(id) = self.selected_device_id() {
-            self.log_lines.clear();
-            self.logcat_offset = 0;
-            self.logcat_receiver = Some(adb::start_logcat(&id));
+        if self.logcat_receiver.is_some() {
+            if let Some(id) = self.selected_device_id() {
+                self.log_lines.clear();
+                self.logcat_offset = 0;
+                let args = adb::split_filter_args(&self.logcat_filter_input);
+                self.logcat_receiver = Some(adb::start_logcat(&id, &args));
+            }
         }
     }
 
@@ -503,6 +673,381 @@ impl App {
         }
     }
 
+    // ─── Action methods (shared by keyboard hotkeys and mouse clicks) ─────────
+
+    fn clear_click_areas(&mut self) { self.click_areas.clear(); }
+
+    fn push_click(&mut self, rect: Rect, target: ClickTarget) {
+        if rect.width > 0 && rect.height > 0 {
+            self.click_areas.push(ClickArea { rect, target });
+        }
+    }
+
+    fn click_at(&self, col: u16, row: u16) -> Option<ClickTarget> {
+        self.click_areas.iter()
+            .rev()
+            .find(|a| point_in(col, row, a.rect))
+            .map(|a| a.target)
+    }
+
+    fn action_apps_launch(&mut self) {
+        if let Some(idx) = self.app_state.selected() {
+            if let Some(app) = self.apps.get(idx) {
+                let pkg = app.package.clone();
+                if let Some(id) = self.selected_device_id() {
+                    match adb::launch_app(&id, &pkg) {
+                        Ok(_) => self.notify(format!("Launched {}", pkg)),
+                        Err(e) => self.notify(format!("Launch failed: {}", e)),
+                    }
+                }
+            }
+        }
+    }
+
+    fn action_apps_uninstall(&mut self) {
+        if let Some(idx) = self.app_state.selected() {
+            if let Some(app) = self.apps.get(idx) {
+                self.confirm = Some(ConfirmAction::UninstallApp(app.package.clone()));
+            }
+        }
+    }
+
+    fn action_apps_force_stop(&mut self) {
+        if let Some(idx) = self.app_state.selected() {
+            if let Some(app) = self.apps.get(idx) {
+                if let Some(id) = self.selected_device_id() {
+                    match adb::force_stop_app(&id, &app.package) {
+                        Ok(_) => self.notify(format!("Force stopped {}", app.package)),
+                        Err(e) => self.notify(format!("Failed to force stop: {}", e)),
+                    }
+                }
+            }
+        }
+    }
+
+    fn action_logcat_toggle_pause(&mut self) {
+        if self.logcat_receiver.is_some() {
+            self.logcat_receiver = None;
+            self.notify("Logcat stream stopped/paused");
+        } else if let Some(id) = self.selected_device_id() {
+            let args = adb::split_filter_args(&self.logcat_filter_input);
+            self.logcat_receiver = Some(adb::start_logcat(&id, &args));
+            self.notify("Logcat stream started");
+        }
+    }
+
+    fn action_logcat_save(&mut self) {
+        let dir = &self.config.log_save_dir;
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            self.notify(format!("Could not create log dir: {}", e));
+            return;
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let path = dir.join(format!("logcat-{}.log", stamp));
+        let body: String = self.log_lines.iter()
+            .map(|(line, _)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        match std::fs::write(&path, body) {
+            Ok(_) => {
+                self.notify(format!("Saved {} lines → {}", self.log_lines.len(), path.display()));
+            }
+            Err(e) => self.notify(format!("Save failed: {}", e)),
+        }
+    }
+
+    fn action_logcat_filter_changed(&mut self) {
+        self.config.logcat_filter = self.logcat_filter_input.clone();
+        self.settings_dirty = true;
+        if self.logcat_receiver.is_some() {
+            self.refresh_logcat();
+        }
+    }
+
+    fn settings_focus_is_editing(&self) -> bool {
+        self.settings_focus == SettingsField::MediaDir
+            || self.settings_focus == SettingsField::LogDir
+            || self.settings_focus == SettingsField::LogcatFilter
+    }
+
+    fn settings_focus_next(&mut self) {
+        self.settings_focus = match self.settings_focus {
+            SettingsField::None | SettingsField::MediaDir => SettingsField::LogDir,
+            SettingsField::LogDir => SettingsField::LogcatFilter,
+            SettingsField::LogcatFilter => SettingsField::MediaDir,
+        };
+    }
+
+    fn settings_clear_focus(&mut self) {
+        self.settings_focus = SettingsField::None;
+    }
+
+    fn save_settings_action(&mut self) {
+        self.config.media_save_dir = PathBuf::from(self.config.media_save_dir.to_string_lossy().to_string());
+        self.config.log_save_dir = PathBuf::from(self.config.log_save_dir.to_string_lossy().to_string());
+        self.config.logcat_filter = self.logcat_filter_input.clone();
+        match self.config.save() {
+            Ok(_) => { self.settings_dirty = false; self.notify("Settings saved"); }
+            Err(e) => self.notify(format!("Save failed: {}", e)),
+        }
+    }
+
+    fn settings_backspace(&mut self) {
+        match self.settings_focus {
+            SettingsField::None => {}
+            SettingsField::MediaDir => {
+                let s = self.config.media_save_dir.to_string_lossy().into_owned();
+                let s = truncate_path_backspace(&s);
+                self.config.media_save_dir = PathBuf::from(s);
+                self.settings_dirty = true;
+            }
+            SettingsField::LogDir => {
+                let s = self.config.log_save_dir.to_string_lossy().into_owned();
+                let s = truncate_path_backspace(&s);
+                self.config.log_save_dir = PathBuf::from(s);
+                self.settings_dirty = true;
+            }
+            SettingsField::LogcatFilter => {
+                self.logcat_filter_input.pop();
+                self.action_logcat_filter_changed();
+            }
+        }
+    }
+
+    fn settings_append_char(&mut self, c: char) {
+        match self.settings_focus {
+            SettingsField::None => {}
+            SettingsField::MediaDir => {
+                let s = self.config.media_save_dir.to_string_lossy().into_owned();
+                let mut s = s;
+                s.push(c);
+                self.config.media_save_dir = PathBuf::from(s);
+                self.settings_dirty = true;
+            }
+            SettingsField::LogDir => {
+                let s = self.config.log_save_dir.to_string_lossy().into_owned();
+                let mut s = s;
+                s.push(c);
+                self.config.log_save_dir = PathBuf::from(s);
+                self.settings_dirty = true;
+            }
+            SettingsField::LogcatFilter => {
+                self.logcat_filter_input.push(c);
+                self.action_logcat_filter_changed();
+            }
+        }
+    }
+
+    fn action_logcat_clear(&mut self) {
+        if let Some(id) = self.selected_device_id() {
+            adb::clear_logcat(&id);
+            self.log_lines.clear();
+            self.logcat_offset = 0;
+            self.notify("Logcat cleared");
+        }
+    }
+
+    fn action_logcat_auto_scroll(&mut self) {
+        self.logcat_auto_scroll = !self.logcat_auto_scroll;
+        self.notify(if self.logcat_auto_scroll { "Auto-scroll ON" } else { "Auto-scroll OFF" });
+    }
+
+    fn action_logcat_restart(&mut self) {
+        self.refresh_logcat();
+    }
+
+    fn action_devices_screenshot(&mut self) {
+        if let Some(id) = self.selected_device_id() {
+            self.notify("Taking screenshot...");
+            let dir = self.config.media_save_dir.clone();
+            match adb::take_screenshot(&id, &dir) {
+                Ok(path) => {
+                    let filename = path.rsplit('/').next().unwrap_or("screenshot.png");
+                    self.notify(format!("Screenshot saved → {}/{}", dir.display(), filename));
+                    self.refresh_recent_media();
+                }
+                Err(e) => self.notify(format!("Failed: {}", e)),
+            }
+        }
+    }
+
+    fn action_devices_wifi(&mut self) {
+        if let Some(id) = self.selected_device_id() {
+            let is_wifi = self.devices.iter()
+                .find(|d| d.id == id)
+                .map(|d| d.connection_types.contains(&"WiFi".to_string()))
+                .unwrap_or(false);
+            if is_wifi {
+                if let Some(d) = self.devices.iter().find(|d| d.id == id) {
+                    if let Some(ref ip) = d.ip_address {
+                        let target = format!("{}:5555", ip);
+                        let _ = std::process::Command::new("adb").args(["disconnect", &target]).status();
+                        self.notify(format!("Disconnected from wireless {}", target));
+                    }
+                }
+            } else {
+                self.notify("Setting up Wireless ADB...");
+                match adb::setup_wireless_adb(&id) {
+                    Ok(ip) => self.notify(format!("Connected to {}:5555. You can unplug USB now.", ip)),
+                    Err(e) => self.notify(format!("Failed to connect: {}", e)),
+                }
+            }
+            self.refresh_devices();
+        }
+    }
+
+    fn action_devices_boundary(&mut self) {
+        if let Some(id) = self.selected_device_id() {
+            self.boundary_enabled = !self.boundary_enabled;
+            match adb::toggle_boundary(&id, self.boundary_enabled) {
+                Ok(_) => self.notify(if self.boundary_enabled { "Boundary enabled" } else { "Boundary disabled (paused)" }),
+                Err(e) => self.notify(format!("Failed to toggle boundary: {}", e)),
+            }
+        }
+    }
+
+    fn action_devices_record(&mut self) {
+        // TODO: re-enable video recording once Quest 3 screenrecord issues are resolved.
+    }
+
+    fn action_devices_media_open(&mut self, idx: usize) {
+        self.selected_media_idx = Some(idx);
+        if let Some(id) = self.selected_device_id() {
+            let path = self.recent_media.get(idx).map(|m| m.path.clone());
+            if let Some(path) = path {
+                self.notify("Opening media...");
+                match adb::open_remote_media(&id, &path) {
+                    Ok(_) => self.notify("Opened media"),
+                    Err(e) => self.notify(format!("Failed to open: {}", e)),
+                }
+            }
+        }
+    }
+
+    fn action_devices_media_download(&mut self) {
+        if let Some(id) = self.selected_device_id() {
+            let path = self.selected_media_idx
+                .and_then(|idx| self.recent_media.get(idx))
+                .map(|m| m.path.clone());
+            let name = self.selected_media_idx
+                .and_then(|idx| self.recent_media.get(idx))
+                .map(|m| m.name.clone());
+            if let (Some(path), Some(name)) = (path, name) {
+                let dir = &self.config.media_save_dir;
+                if let Err(e) = std::fs::create_dir_all(dir) {
+                    self.notify(format!("Could not create dir: {}", e));
+                    return;
+                }
+                let local = dir.join(&name).to_string_lossy().into_owned();
+                self.notify("Downloading media...");
+                match adb::pull_file(&id, &path, &local) {
+                    Ok(_) => self.notify(format!("Downloaded → {}", local)),
+                    Err(e) => self.notify(format!("Failed to download: {}", e)),
+                }
+            }
+        }
+    }
+
+    fn action_devices_media_delete(&mut self) {
+        let path = self.selected_media_idx
+            .and_then(|idx| self.recent_media.get(idx))
+            .map(|m| m.path.clone());
+        if let Some(path) = path {
+            self.confirm = Some(ConfirmAction::DeleteFile(path));
+        }
+    }
+
+    fn action_devices_media_prev(&mut self) {
+        if !self.recent_media.is_empty() {
+            if let Some(idx) = self.selected_media_idx {
+                self.selected_media_idx = Some(idx.saturating_sub(1));
+            } else {
+                self.selected_media_idx = Some(0);
+            }
+        }
+    }
+
+    fn action_devices_media_next(&mut self) {
+        if !self.recent_media.is_empty() {
+            if let Some(idx) = self.selected_media_idx {
+                self.selected_media_idx = Some((idx + 1).min(self.recent_media.len() - 1));
+            } else {
+                self.selected_media_idx = Some(0);
+            }
+        }
+    }
+
+    fn action_files_pull_single(&mut self) {
+        if let Some(idx) = self.file_state.selected() {
+            self.pull_file_at(idx);
+        }
+    }
+
+    fn action_files_download_selected(&mut self) {
+        if !self.selected_files.is_empty() {
+            self.download_selected_files();
+        } else if let Some(idx) = self.file_state.selected() {
+            self.pull_file_at(idx);
+        }
+    }
+
+    fn action_files_select_all(&mut self) {
+        let all: HashSet<usize> = self.files.iter().enumerate()
+            .filter(|(_, f)| !f.is_dir)
+            .map(|(i, _)| i)
+            .collect();
+        if self.selected_files == all {
+            self.selected_files.clear();
+        } else {
+            self.selected_files = all;
+        }
+    }
+
+    fn action_files_delete(&mut self) {
+        if let Some(idx) = self.file_state.selected() {
+            if let Some(file) = self.files.get(idx) {
+                if file.name != ".." {
+                    let sep = if self.current_path.ends_with('/') { "" } else { "/" };
+                    let path = format!("{}{}{}", self.current_path, sep, file.name);
+                    self.confirm = Some(ConfirmAction::DeleteFile(path));
+                }
+            }
+        }
+    }
+
+    fn action_files_go_up(&mut self) {
+        if self.current_path != "/" {
+            if let Some(pos) = self.current_path.rfind('/').filter(|&p| p > 0) {
+                self.current_path = self.current_path[..pos].to_string();
+                if self.current_path.is_empty() { self.current_path = "/".to_string(); }
+            }
+            self.refresh_files();
+        }
+    }
+
+    fn action_install_selected(&mut self) {
+        self.install_selected_apks();
+    }
+
+    fn action_install_push(&mut self) {
+        self.push_selected_files();
+    }
+
+    fn action_install_select_all(&mut self) {
+        let all: HashSet<usize> = self.local_files.iter().enumerate()
+            .filter(|(_, f)| f.is_apk)
+            .map(|(i, _)| i)
+            .collect();
+        if self.selected_local == all {
+            self.selected_local.clear();
+        } else {
+            self.selected_local = all;
+        }
+    }
+
     // ─── Enter ───────────────────────────────────────────────────────────────
 
     fn handle_enter(&mut self) {
@@ -584,11 +1129,15 @@ impl App {
             let name = file.name.clone();
             let sep = if self.current_path.ends_with('/') { "" } else { "/" };
             let remote = format!("{}{}{}", self.current_path, sep, name);
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            let local = format!("{}/Downloads/{}", home, name);
+            let dir = &self.config.media_save_dir;
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                self.notify(format!("Could not create dir: {}", e));
+                return;
+            }
+            let local = dir.join(&name).to_string_lossy().into_owned();
             if let Some(id) = self.selected_device_id() {
                 match adb::pull_file(&id, &remote, &local) {
-                    Ok(_) => self.notify(format!("Saved → ~/Downloads/{}", name)),
+                    Ok(_) => self.notify(format!("Saved → {}", local)),
                     Err(e) => self.notify(format!("Pull failed: {}", e)),
                 }
             }
@@ -606,7 +1155,11 @@ impl App {
             Some(id) => id,
             None => { self.notify("No device selected"); return; }
         };
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let dir = &self.config.media_save_dir;
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            self.notify(format!("Could not create dir: {}", e));
+            return;
+        }
         let indices: Vec<usize> = self.selected_files.iter().copied().collect();
         let mut ok = 0usize;
         let mut fail = 0usize;
@@ -615,7 +1168,7 @@ impl App {
                 if file.is_dir { continue; }
                 let sep = if self.current_path.ends_with('/') { "" } else { "/" };
                 let remote = format!("{}{}{}", self.current_path, sep, file.name);
-                let local = format!("{}/Downloads/{}", home, file.name);
+                let local = dir.join(&file.name).to_string_lossy().into_owned();
                 match adb::pull_file(&id, &remote, &local) {
                     Ok(_) => ok += 1,
                     Err(_) => fail += 1,
@@ -623,7 +1176,7 @@ impl App {
             }
         }
         self.selected_files.clear();
-        self.notify(format!("Downloaded: {} OK, {} failed → ~/Downloads", ok, fail));
+        self.notify(format!("Downloaded: {} OK, {} failed → {}", ok, fail, dir.display()));
     }
 
     // ─── Install APKs ─────────────────────────────────────────────────────────
@@ -774,6 +1327,30 @@ impl App {
         }
 
         use crossterm::event::KeyCode;
+
+        if self.logcat_filter_focused {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => { self.logcat_filter_focused = false; }
+                KeyCode::Backspace => { self.logcat_filter_input.pop(); self.action_logcat_filter_changed(); }
+                KeyCode::Char(c) => {
+                    self.logcat_filter_input.push(c);
+                    self.action_logcat_filter_changed();
+                }
+                _ => {}
+            }
+            return;
+        }
+        if self.view == View::Settings && self.settings_focus_is_editing() {
+            match key.code {
+                KeyCode::Esc => { self.settings_clear_focus(); }
+                KeyCode::Tab => self.settings_focus_next(),
+                KeyCode::Backspace => self.settings_backspace(),
+                KeyCode::Char('s') | KeyCode::Char('S') => self.save_settings_action(),
+                KeyCode::Char(c) => self.settings_append_char(c),
+                _ => {}
+            }
+            return;
+        }
         match key.code {
             KeyCode::Char('?') => self.help_visible = true,
             KeyCode::Tab => { self.tab_index = (self.tab_index + 1) % 6; self.switch_tab(); }
@@ -786,13 +1363,7 @@ impl App {
             KeyCode::Char(' ') => self.toggle_selection(),
             KeyCode::Esc => {
                 match self.view {
-                    View::Files if self.current_path != "/" => {
-                        if let Some(pos) = self.current_path.rfind('/').filter(|&p| p > 0) {
-                            self.current_path = self.current_path[..pos].to_string();
-                            if self.current_path.is_empty() { self.current_path = "/".to_string(); }
-                        }
-                        self.refresh_files();
-                    }
+                    View::Files => self.action_files_go_up(),
                     View::Install => {
                         if let Some(parent) = std::path::Path::new(&self.local_path).parent() {
                             self.local_path = parent.to_string_lossy().to_string();
@@ -815,235 +1386,99 @@ impl App {
             },
             KeyCode::Char('p') => {
                 if self.view == View::Files {
-                    if let Some(idx) = self.file_state.selected() { self.pull_file_at(idx); }
+                    self.action_files_pull_single();
                 } else if self.view == View::Logcat {
-                    if self.logcat_receiver.is_some() {
-                        self.logcat_receiver = None;
-                        self.notify("Logcat stream stopped/paused");
-                    } else if let Some(id) = self.selected_device_id() {
-                        self.logcat_receiver = Some(adb::start_logcat(&id));
-                        self.notify("Logcat stream started");
-                    }
+                    self.action_logcat_toggle_pause();
                 }
             }
-            // D = Download selected (Files) / default dir nav via 'd' delete is gone — use Delete key instead
             KeyCode::Char('d') => {
                 if self.view == View::Files {
-                    if !self.selected_files.is_empty() {
-                        self.download_selected_files();
-                    } else if let Some(idx) = self.file_state.selected() {
-                        self.pull_file_at(idx);
-                    }
+                    self.action_files_download_selected();
                 } else if self.view == View::Devices {
-                    if let Some(id) = self.selected_device_id() {
-                        let path = self.selected_media_idx
-                            .and_then(|idx| self.recent_media.get(idx))
-                            .map(|m| m.path.clone());
-                        let name = self.selected_media_idx
-                            .and_then(|idx| self.recent_media.get(idx))
-                            .map(|m| m.name.clone());
-                        if let (Some(path), Some(name)) = (path, name) {
-                            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                            let local = format!("{}/Downloads/{}", home, name);
-                            self.notify("Downloading media...");
-                            match adb::pull_file(&id, &path, &local) {
-                                Ok(_) => self.notify(format!("Downloaded to ~/Downloads/{}", name)),
-                                Err(e) => self.notify(format!("Failed to download: {}", e)),
-                            }
-                        }
-                    }
+                    self.action_devices_media_download();
                 }
             }
             KeyCode::Char('u') => {
                 if self.view == View::Apps {
-                    if let Some(idx) = self.app_state.selected() {
-                        if let Some(app) = self.apps.get(idx) {
-                            self.confirm = Some(ConfirmAction::UninstallApp(app.package.clone()));
-                        }
-                    }
+                    self.action_apps_uninstall();
                 } else if self.view == View::Install {
-                    self.push_selected_files();
+                    self.action_install_push();
                 }
             }
             KeyCode::Char('f') => {
                 if self.view == View::Apps {
-                    if let Some(idx) = self.app_state.selected() {
-                        if let Some(app) = self.apps.get(idx) {
-                            if let Some(id) = self.selected_device_id() {
-                                match adb::force_stop_app(&id, &app.package) {
-                                    Ok(_) => self.notify(format!("Force stopped {}", app.package)),
-                                    Err(e) => self.notify(format!("Failed to force stop: {}", e)),
-                                }
-                            }
-                        }
-                    }
+                    self.action_apps_force_stop();
                 }
             }
             KeyCode::Char('i') => {
                 if self.view == View::Install {
-                    self.install_selected_apks();
+                    self.action_install_selected();
                 }
             }
             KeyCode::Char('c') => {
                 if self.view == View::Logcat {
-                    if let Some(id) = self.selected_device_id() {
-                        adb::clear_logcat(&id);
-                        self.log_lines.clear();
-                        self.logcat_offset = 0;
-                        self.notify("Logcat cleared");
-                    }
+                    self.action_logcat_clear();
                 }
             }
             KeyCode::Char('w') => {
                 if self.view == View::Devices {
-                    if let Some(id) = self.selected_device_id() {
-                        let is_wifi = self.devices.iter()
-                            .find(|d| d.id == id)
-                            .map(|d| d.connection_types.contains(&"WiFi".to_string()))
-                            .unwrap_or(false);
-                        if is_wifi {
-                            if let Some(d) = self.devices.iter().find(|d| d.id == id) {
-                                if let Some(ref ip) = d.ip_address {
-                                    let target = format!("{}:5555", ip);
-                                    let _ = std::process::Command::new("adb").args(["disconnect", &target]).status();
-                                    self.notify(format!("Disconnected from wireless {}", target));
-                                }
-                            }
-                        } else {
-                            self.notify("Setting up Wireless ADB...");
-                            match adb::setup_wireless_adb(&id) {
-                                Ok(ip) => self.notify(format!("Connected to {}:5555. You can unplug USB now.", ip)),
-                                Err(e) => self.notify(format!("Failed to connect: {}", e)),
-                            }
-                        }
-                        self.refresh_devices();
-                    }
+                    self.action_devices_wifi();
+                } else if self.view == View::Logcat {
+                    self.action_logcat_save();
                 }
             }
             KeyCode::Char('b') => {
                 if self.view == View::Devices {
-                    if let Some(id) = self.selected_device_id() {
-                        self.boundary_enabled = !self.boundary_enabled;
-                        match adb::toggle_boundary(&id, self.boundary_enabled) {
-                            Ok(_) => self.notify(if self.boundary_enabled { "Boundary enabled" } else { "Boundary disabled (paused)" }),
-                            Err(e) => self.notify(format!("Failed to toggle boundary: {}", e)),
-                        }
-                    }
+                    self.action_devices_boundary();
                 }
             }
             KeyCode::Char('s') => {
                 if self.view == View::Devices {
-                    if let Some(id) = self.selected_device_id() {
-                        self.notify("Taking screenshot...");
-                        match adb::take_screenshot(&id) {
-                            Ok(path) => {
-                                let filename = path.split('/').last().unwrap_or("screenshot.png");
-                                self.notify(format!("Screenshot saved → ~/Downloads/{}", filename));
-                                self.refresh_recent_media();
-                            }
-                            Err(e) => self.notify(format!("Failed: {}", e)),
-                        }
-                    }
+                    self.action_devices_screenshot();
                 } else if self.view == View::Logcat {
-                    self.logcat_auto_scroll = !self.logcat_auto_scroll;
-                    self.notify(if self.logcat_auto_scroll { "Auto-scroll ON" } else { "Auto-scroll OFF" });
+                    self.action_logcat_auto_scroll();
+                } else if self.view == View::Settings && !self.settings_focus_is_editing() {
+                    self.save_settings_action();
                 }
             }
             KeyCode::Char('v') => {
-                // TODO: re-enable video recording once Quest 3 screenrecord issues are resolved.
+                if self.view == View::Devices {
+                    self.action_devices_record();
+                }
             }
             KeyCode::Char('[') => {
-                if self.view == View::Devices && !self.recent_media.is_empty() {
-                    if let Some(idx) = self.selected_media_idx {
-                        self.selected_media_idx = Some(idx.saturating_sub(1));
-                    } else {
-                        self.selected_media_idx = Some(0);
-                    }
+                if self.view == View::Devices {
+                    self.action_devices_media_prev();
                 }
             }
             KeyCode::Char(']') => {
-                if self.view == View::Devices && !self.recent_media.is_empty() {
-                    if let Some(idx) = self.selected_media_idx {
-                        self.selected_media_idx = Some((idx + 1).min(self.recent_media.len() - 1));
-                    } else {
-                        self.selected_media_idx = Some(0);
-                    }
+                if self.view == View::Devices {
+                    self.action_devices_media_next();
                 }
             }
             KeyCode::Char('o') => {
                 if self.view == View::Devices {
-                    if let Some(id) = self.selected_device_id() {
-                        let path = self.selected_media_idx
-                            .and_then(|idx| self.recent_media.get(idx))
-                            .map(|m| m.path.clone());
-                        if let Some(path) = path {
-                            self.notify("Opening media...");
-                            match adb::open_remote_media(&id, &path) {
-                                Ok(_) => self.notify("Opened media"),
-                                Err(e) => self.notify(format!("Failed to open: {}", e)),
-                            }
-                        }
+                    if let Some(idx) = self.selected_media_idx {
+                        self.action_devices_media_open(idx);
                     }
                 }
             }
             KeyCode::Char('x') => {
                 if self.view == View::Devices {
-                    let path = self.selected_media_idx
-                        .and_then(|idx| self.recent_media.get(idx))
-                        .map(|m| m.path.clone());
-                    if let Some(path) = path {
-                        self.confirm = Some(ConfirmAction::DeleteFile(path));
-                    }
+                    self.action_devices_media_delete();
                 } else if self.view == View::Files {
-                    if let Some(idx) = self.file_state.selected() {
-                        if let Some(file) = self.files.get(idx) {
-                            if file.name != ".." {
-                                let sep = if self.current_path.ends_with('/') { "" } else { "/" };
-                                let path = format!("{}{}{}", self.current_path, sep, file.name);
-                                self.confirm = Some(ConfirmAction::DeleteFile(path));
-                            }
-                        }
-                    }
+                    self.action_files_delete();
                 }
             }
             KeyCode::Delete => {
                 if self.view == View::Files {
-                    if let Some(idx) = self.file_state.selected() {
-                        if let Some(file) = self.files.get(idx) {
-                            if file.name != ".." {
-                                let sep = if self.current_path.ends_with('/') { "" } else { "/" };
-                                let path = format!("{}{}{}", self.current_path, sep, file.name);
-                                self.confirm = Some(ConfirmAction::DeleteFile(path));
-                            }
-                        }
-                    }
+                    self.action_files_delete();
                 }
             }
             KeyCode::Char('a') => {
-                // Select all files in current view
                 match self.view {
-                    View::Files => {
-                        let all: HashSet<usize> = self.files.iter().enumerate()
-                            .filter(|(_, f)| !f.is_dir)
-                            .map(|(i, _)| i)
-                            .collect();
-                        if self.selected_files == all {
-                            self.selected_files.clear();
-                        } else {
-                            self.selected_files = all;
-                        }
-                    }
-                    View::Install => {
-                        let all: HashSet<usize> = self.local_files.iter().enumerate()
-                            .filter(|(_, f)| f.is_apk)
-                            .map(|(i, _)| i)
-                            .collect();
-                        if self.selected_local == all {
-                            self.selected_local.clear();
-                        } else {
-                            self.selected_local = all;
-                        }
-                    }
+                    View::Files => self.action_files_select_all(),
+                    View::Install => self.action_install_select_all(),
                     _ => {}
                 }
             }
@@ -1055,168 +1490,98 @@ impl App {
 
     fn handle_mouse(&mut self, event: crossterm::event::MouseEvent) {
         use crossterm::event::{MouseButton, MouseEventKind};
-        let col = event.column;
-        let row = event.row;
-        let (w, h) = self.terminal_size;
-        if w == 0 || h == 0 { return; }
-        let area = Rect::new(0, 0, w, h);
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(1)])
-            .split(area);
-        let main_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-            .split(chunks[1]);
-
-        let tab_area = chunks[0];
-        let sidebar_area = main_chunks[0];
-
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                if self.help_visible { self.help_visible = false; return; }
-
-                if self.confirm.is_some() {
-                    let popup = centered_rect(55, 30, area);
-                    if point_in(col, row, popup) {
-                        if col < popup.x + popup.width / 2 { self.execute_confirm(); }
-                        else { self.confirm = None; }
-                    } else {
-                        self.confirm = None;
-                    }
-                    return;
-                }
-
-                if point_in(col, row, tab_area) {
-                    self.click_tab(col, tab_area);
-                    return;
-                }
-
-                if point_in(col, row, sidebar_area) {
-                    let list_top = sidebar_area.y + 1;
-                    if row >= list_top {
-                        let visual_idx = (row - list_top) as usize;
-                        // Check if click is on the checkbox area (first 4 chars)
-                        let is_checkbox_click = col >= sidebar_area.x + 1 && col < sidebar_area.x + 5;
-                        let now = Instant::now();
-                        let prev_idx = self.get_selected_idx();
-                        self.select_item_at(visual_idx);
-                        let new_idx = self.get_selected_idx();
-
-                        // Toggle selection if click was in checkbox zone
-                        if is_checkbox_click {
-                            self.toggle_selection();
-                            return;
-                        }
-
-                        // Double-click → Enter
-                        let is_double = self.last_click_time
-                            .map(|t| t.elapsed() < Duration::from_millis(400))
-                            .unwrap_or(false)
-                            && prev_idx == new_idx
-                            && prev_idx.is_some();
-
-                        self.last_click_time = Some(now);
-                        self.last_click_idx = new_idx;
-
-                        if is_double { self.handle_enter(); }
-                    }
-                }
-
-                // Click on detail panel "Install" or "Download" button area
-                let detail_area = main_chunks[1];
-                if point_in(col, row, detail_area) {
-                    if self.view == View::Devices {
-                        if let Some(idx) = self.device_state.selected() {
-                            if let Some(d) = self.devices.get(idx) {
-                                let mut action_start = 8;
-                                if d.ip_address.is_some() { action_start += 1; }
-                                if d.battery_level != -1 { action_start += 1; }
-                                if d.controller_battery_left.is_some() || d.controller_battery_right.is_some() { action_start += 1; }
-                                action_start += 2; // spacer + header
-
-                                let rel_row = row as i32 - detail_area.y as i32;
-
-                                if rel_row == action_start {
-                                    self.handle_key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('w'), crossterm::event::KeyModifiers::empty()));
-                                } else if rel_row == action_start + 1 {
-                                    self.handle_key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('b'), crossterm::event::KeyModifiers::empty()));
-                                } else if rel_row == action_start + 2 {
-                                    self.handle_key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('s'), crossterm::event::KeyModifiers::empty()));
-                                } else if rel_row == action_start + 3 {
-                                    self.handle_key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('v'), crossterm::event::KeyModifiers::empty()));
-                                } else {
-                                    let gallery_start = action_start + 6;
-                                    let gallery_end = gallery_start + self.recent_media.len() as i32;
-                                    if rel_row >= gallery_start && rel_row < gallery_end {
-                                        let media_idx = (rel_row - gallery_start) as usize;
-                                        if media_idx < self.recent_media.len() {
-                                            self.selected_media_idx = Some(media_idx);
-                                            let now = Instant::now();
-                                            let is_double = self.last_click_time
-                                                .map(|t| t.elapsed() < Duration::from_millis(400))
-                                                .unwrap_or(false)
-                                                && self.last_click_idx == Some(media_idx);
-                                            self.last_click_time = Some(now);
-                                            self.last_click_idx = Some(media_idx);
-                                            if is_double {
-                                                self.handle_key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('o'), crossterm::event::KeyModifiers::empty()));
-                                            }
-                                        }
-                                    } else if rel_row == gallery_end + 1 && !self.recent_media.is_empty() {
-                                        let rel_col = col as i32 - detail_area.x as i32;
-                                        if rel_col < 15 {
-                                            self.handle_key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('o'), crossterm::event::KeyModifiers::empty()));
-                                        } else if rel_col >= 15 && rel_col < 31 {
-                                            self.handle_key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('d'), crossterm::event::KeyModifiers::empty()));
-                                        } else {
-                                            self.handle_key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('x'), crossterm::event::KeyModifiers::empty()));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else if self.view == View::Files {
-                        if !self.selected_files.is_empty() {
-                            let rel_row = row as i32 - detail_area.y as i32;
-                            if rel_row >= 2 && rel_row <= 4 {
-                                self.download_selected_files();
-                            }
-                        }
-                    } else if self.view == View::Install {
-                        if !self.selected_local.is_empty() {
-                            let rel_row = row as i32 - detail_area.y as i32;
-                            if rel_row >= 4 && rel_row <= 6 {
-                                self.install_selected_apks();
-                            }
-                        }
-                    }
+                if let Some(target) = self.click_at(event.column, event.row) {
+                    self.dispatch_click(target);
                 }
             }
-
             MouseEventKind::ScrollUp => {
-                if self.confirm.is_some() || self.help_visible { return; }
-                self.nav_up();
+                if self.confirm.is_none() && !self.help_visible { self.nav_up(); }
             }
             MouseEventKind::ScrollDown => {
-                if self.confirm.is_some() || self.help_visible { return; }
-                self.nav_down();
+                if self.confirm.is_none() && !self.help_visible { self.nav_down(); }
             }
             _ => {}
         }
     }
 
-    fn click_tab(&mut self, col: u16, tab_area: Rect) {
-        let tab_names = [" Devices ", " Apps ", " Files ", " Install ", " Logcat ", " Settings "];
-        let mut x = tab_area.x + 1;
-        for (i, name) in tab_names.iter().enumerate() {
-            let w = name.len() as u16;
-            if col >= x && col < x + w {
-                if self.tab_index != i { self.tab_index = i; self.switch_tab(); }
-                return;
+    fn dispatch_click(&mut self, target: ClickTarget) {
+        match target {
+            ClickTarget::Tab(i) => {
+                if self.tab_index != i {
+                    self.tab_index = i;
+                    self.switch_tab();
+                }
             }
-            x += w + 1;
+            ClickTarget::SidebarItem(visual_idx) => {
+                let now = Instant::now();
+                let prev_idx = self.get_selected_idx();
+                self.select_item_at(visual_idx);
+                let new_idx = self.get_selected_idx();
+                let is_double = self.last_click_time
+                    .map(|t| t.elapsed() < Duration::from_millis(400))
+                    .unwrap_or(false)
+                    && prev_idx == new_idx
+                    && prev_idx.is_some();
+                self.last_click_time = Some(now);
+                self.last_click_idx = new_idx;
+                if is_double { self.handle_enter(); }
+            }
+            ClickTarget::Checkbox(visual_idx) => {
+                self.select_item_at(visual_idx);
+                self.toggle_selection();
+            }
+            ClickTarget::HelpClose => { self.help_visible = false; }
+            ClickTarget::ConfirmYes => { self.execute_confirm(); }
+            ClickTarget::ConfirmNo => { self.confirm = None; }
+            ClickTarget::WifiToggle => self.action_devices_wifi(),
+            ClickTarget::BoundaryToggle => self.action_devices_boundary(),
+            ClickTarget::Screenshot => self.action_devices_screenshot(),
+            ClickTarget::RecordVideo => self.action_devices_record(),
+            ClickTarget::MediaItem(idx) => {
+                let now = Instant::now();
+                let prev_idx = self.selected_media_idx;
+                self.selected_media_idx = Some(idx);
+                let is_double = self.last_click_time
+                    .map(|t| t.elapsed() < Duration::from_millis(400))
+                    .unwrap_or(false)
+                    && prev_idx == Some(idx);
+                self.last_click_time = Some(now);
+                self.last_click_idx = Some(idx);
+                if is_double { self.action_devices_media_download(); }
+            }
+            ClickTarget::MediaOpen => {
+                if let Some(idx) = self.selected_media_idx {
+                    self.action_devices_media_open(idx);
+                }
+            }
+            ClickTarget::MediaDownload => self.action_devices_media_download(),
+            ClickTarget::MediaDelete => self.action_devices_media_delete(),
+            ClickTarget::MediaPrev => self.action_devices_media_prev(),
+            ClickTarget::MediaNext => self.action_devices_media_next(),
+            ClickTarget::AppsLaunch => self.action_apps_launch(),
+            ClickTarget::AppsUninstall => self.action_apps_uninstall(),
+            ClickTarget::AppsForceStop => self.action_apps_force_stop(),
+            ClickTarget::FilesDownloadSelected => self.action_files_download_selected(),
+            ClickTarget::FilesPullSingle => self.action_files_pull_single(),
+            ClickTarget::FilesSelectAll => self.action_files_select_all(),
+            ClickTarget::FilesDelete => self.action_files_delete(),
+            ClickTarget::FilesGoUp => self.action_files_go_up(),
+            ClickTarget::InstallSelected => self.action_install_selected(),
+            ClickTarget::InstallPush => self.action_install_push(),
+            ClickTarget::InstallSelectAll => self.action_install_select_all(),
+            ClickTarget::LogcatPause => self.action_logcat_toggle_pause(),
+            ClickTarget::LogcatClear => self.action_logcat_clear(),
+            ClickTarget::LogcatRestart => self.action_logcat_restart(),
+            ClickTarget::LogcatSave => self.action_logcat_save(),
+            ClickTarget::LogcatFilterField => { self.logcat_filter_focused = true; }
+            ClickTarget::SettingsMediaField => { self.settings_focus = SettingsField::MediaDir; }
+            ClickTarget::SettingsLogField => { self.settings_focus = SettingsField::LogDir; }
+            ClickTarget::SettingsLogcatFilterField => { self.settings_focus = SettingsField::LogcatFilter; }
+            ClickTarget::SettingsSave => {
+                self.save_settings_action();
+            }
         }
     }
 
@@ -1294,6 +1659,9 @@ impl App {
             5 => View::Settings,
             _ => View::Devices,
         };
+        if self.view != View::Settings {
+            self.settings_focus = SettingsField::None;
+        }
         match self.view {
             View::Apps => self.refresh_apps(),
             View::Files => self.refresh_files(),
@@ -1322,24 +1690,46 @@ impl App {
             ])
             .split(area);
 
+        self.clear_click_areas();
+
         // ── Banner ──
         self.draw_banner(f, chunks[0], banner_mode);
 
         // ── Tab bar ──
-        let tabs = Tabs::new(vec![
-            " Devices ", " Apps ", " Files ", " Install ", " Logcat ", " Settings ",
-        ])
-        .select(self.tab_index)
-        .block(Block::default().borders(Borders::ALL).title(" OpenQuest TUI "))
-        .style(Style::default().fg(Color::Gray))
-        .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
-        f.render_widget(tabs, chunks[1]);
+        let tab_area = chunks[1];
+        let tab_names = [" Devices ", " Apps ", " Files ", " Install ", " Logcat ", " Settings "];
+        let tabs = Tabs::new(tab_names.to_vec())
+            .select(self.tab_index)
+            .block(Block::default().borders(Borders::ALL).title(" OpenQuest TUI "))
+            .style(Style::default().fg(Color::Gray))
+            .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        f.render_widget(tabs, tab_area);
+
+        // Ratatui's Tabs widget renders each title as: pad_left(" ") + title + pad_right(" ") + divider("|")
+        // between titles. Reflect that when registering click rects so a click on the visible
+        // title text actually hits the right tab.
+        let mut x = tab_area.x + 1;
+        let n_tabs = tab_names.len();
+        for (i, name) in tab_names.iter().enumerate() {
+            let w = name.len() as u16;
+            let title_x = x + 1; // skip the leading space (padding_left)
+            self.push_click(Rect::new(title_x, tab_area.y + 1, w, 1), ClickTarget::Tab(i));
+            x += 1 + w + 1; // pad_left + title + pad_right
+            if i + 1 < n_tabs { x += 1; } // divider between (non-last) tabs
+        }
 
         // ── Sidebar | Detail ──
-        let main_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-            .split(chunks[2]);
+        let main_chunks = if self.view == View::Logcat {
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+                .split(chunks[2])
+        } else {
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+                .split(chunks[2])
+        };
 
         self.draw_sidebar(f, main_chunks[0]);
         self.draw_detail(f, main_chunks[1]);
@@ -1362,6 +1752,11 @@ impl App {
                     if n > 0 { format!("  [{}] file(s) selected — i:install+pobb  a:select-all", n) }
                     else { " Space:select  i:install  Enter:open-dir  r:refresh  ?:help  q:quit".to_string() }
                 }
+                View::Logcat => {
+                    if self.logcat_receiver.is_some() { " p:stop  c:clear  w:save  ?:help".to_string() }
+                    else { " p:start  r:restart  ?:help".to_string() }
+                }
+                View::Settings => " Tab:cycle  Esc:done  s:save  ?:help".to_string(),
                 _ => " click/scroll:mouse  Tab:tabs  r:refresh  ?:help  q:quit".to_string(),
             };
             format!(" {} | active: {}{}", self.devices.len(), dev, sel)
@@ -1390,23 +1785,30 @@ impl App {
             BannerMode::Art => {
                 let art_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
                 let tag_style = Style::default().fg(Color::DarkGray);
+                // Pre-pad every line so the box and the tagline line up centered together.
+                // Without this the box renders at col 0 while the tagline uses Alignment::Center
+                // — on wider terminals the box's right edge ends up visually offset from the tagline.
+                let banner_w = BANNER_OPENQUEST[0].chars().count() as u16;
+                let pad = (area.width.saturating_sub(banner_w)) / 2;
+                let pad_str: String = " ".repeat(pad as usize);
                 let mut lines: Vec<Line> = BANNER_OPENQUEST
                     .iter()
-                    .map(|&s| Line::from(Span::styled(s, art_style)))
+                    .map(|&s| Line::from(Span::styled(format!("{}{}", pad_str, s), art_style)))
                     .collect();
                 lines.push(Line::from(Span::styled(
-                    "VR DEVICE MANAGER · v0.1 · ADB",
+                    format!("{}VR DEVICE MANAGER · v0.1 · ADB", pad_str),
                     tag_style,
                 )));
-                f.render_widget(
-                    Paragraph::new(lines).alignment(Alignment::Center),
-                    area,
-                );
+                f.render_widget(Paragraph::new(lines), area);
             }
         }
     }
 
     fn draw_sidebar(&mut self, f: &mut Frame, area: Rect) {
+        let list_inner_top = area.y + 1;
+        let list_inner_left = area.x + 1;
+        let list_inner_w = area.width.saturating_sub(2);
+
         match self.view {
 
             View::Devices => {
@@ -1426,6 +1828,12 @@ impl App {
                     .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
                     .highlight_symbol("> ");
                 f.render_stateful_widget(list, area, &mut self.device_state);
+                for i in 0..self.devices.len() {
+                    self.push_click(
+                        Rect::new(list_inner_left, list_inner_top + i as u16, list_inner_w, 1),
+                        ClickTarget::SidebarItem(i),
+                    );
+                }
             }
 
             View::Apps => {
@@ -1440,6 +1848,12 @@ impl App {
                     .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
                     .highlight_symbol("> ");
                 f.render_stateful_widget(list, area, &mut self.app_state);
+                for i in 0..self.apps.len() {
+                    self.push_click(
+                        Rect::new(list_inner_left, list_inner_top + i as u16, list_inner_w, 1),
+                        ClickTarget::SidebarItem(i),
+                    );
+                }
             }
 
             View::Files => {
@@ -1473,6 +1887,14 @@ impl App {
                     .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
                     .highlight_symbol("> ");
                 f.render_stateful_widget(list, area, &mut self.file_state);
+                for i in 0..self.files.len() {
+                    let row_rect = Rect::new(list_inner_left, list_inner_top + i as u16, list_inner_w, 1);
+                    self.push_click(row_rect, ClickTarget::SidebarItem(i));
+                    if !self.files[i].is_dir {
+                        let cb_rect = Rect::new(area.x + 1, list_inner_top + i as u16, 4, 1);
+                        self.push_click(cb_rect, ClickTarget::Checkbox(i));
+                    }
+                }
             }
 
             View::Install => {
@@ -1530,36 +1952,105 @@ impl App {
                     .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
                     .highlight_symbol("> ");
                 f.render_stateful_widget(list, area, &mut self.local_file_state);
+                for i in 0..self.local_files.len() {
+                    let row_rect = Rect::new(list_inner_left, list_inner_top + i as u16, list_inner_w, 1);
+                    self.push_click(row_rect, ClickTarget::SidebarItem(i));
+                    if !self.local_files[i].is_dir {
+                        let cb_rect = Rect::new(area.x + 1, list_inner_top + i as u16, 4, 1);
+                        self.push_click(cb_rect, ClickTarget::Checkbox(i));
+                    }
+                }
             }
 
             View::Logcat => {
-                let visible = area.height.saturating_sub(2) as usize;
+                let inner_h = area.height.saturating_sub(4) as usize;
                 let total = self.log_lines.len();
-                let end = (self.logcat_offset + 1).min(total);
-                let start = end.saturating_sub(visible);
-                let items: Vec<ListItem> = self.log_lines.iter()
-                    .skip(start).take(visible)
-                    .map(|(line, level)| {
-                        ListItem::new(Span::styled(line.as_str(), Style::default().fg(level.color())))
-                    })
-                    .collect();
-                let lbl = if self.logcat_auto_scroll { "↓ AUTO" } else { "SCROLL" };
-                let title = format!(" Logcat  {}  {} lines ", lbl, total);
+                let end = if total == 0 { 0 } else { (self.logcat_offset + 1).min(total) };
+                let start = end.saturating_sub(inner_h.max(1));
+                let mut visible_lines: Vec<Line> = Vec::new();
+                let cursor = if self.logcat_filter_focused { "▏" } else { "" };
+                let filter_disp = if self.logcat_filter_input.is_empty() {
+                    "(none — all tags)".to_string()
+                } else {
+                    self.logcat_filter_input.clone()
+                };
+                let filter_color = if self.logcat_filter_focused { Color::Yellow } else { Color::DarkGray };
+                visible_lines.push(Line::from(vec![
+                    Span::styled("Filter: ", Style::default().fg(Color::Gray)),
+                    Span::styled(format!("{}{}", filter_disp, cursor), Style::default().fg(filter_color)),
+                ]));
+                visible_lines.push(Line::from(""));
+                visible_lines.extend(self.log_lines.iter()
+                    .skip(start)
+                    .take(end.saturating_sub(start))
+                    .map(|(line, level)| Line::from(Span::styled(line.clone(), Style::default().fg(level.color())))));
+                let status_lbl = if self.logcat_receiver.is_some() {
+                    if self.logcat_auto_scroll { "▶ STREAM · AUTO" } else { "▶ STREAM" }
+                } else {
+                    "■ STOPPED"
+                };
+                let title = format!(" Logcat  {}  {} lines ", status_lbl, total);
+                let filter_row = area.y + 1;
+                self.push_click(Rect::new(area.x + 1, filter_row, area.width.saturating_sub(2), 1), ClickTarget::LogcatFilterField);
                 f.render_widget(
-                    List::new(items).block(Block::default().borders(Borders::ALL).title(title)),
+                    Paragraph::new(visible_lines)
+                        .block(Block::default().borders(Borders::ALL).title(title))
+                        .wrap(Wrap { trim: false }),
                     area,
                 );
             }
 
             View::Settings => {
+                let media_row = area.y + 3;
+                let log_row = area.y + 5;
+                let filter_row = area.y + 7;
+                let save_row = area.y + 9;
+                self.push_click(Rect::new(area.x + 1, media_row, area.width.saturating_sub(2), 1), ClickTarget::SettingsMediaField);
+                self.push_click(Rect::new(area.x + 1, log_row, area.width.saturating_sub(2), 1), ClickTarget::SettingsLogField);
+                self.push_click(Rect::new(area.x + 1, filter_row, area.width.saturating_sub(2), 1), ClickTarget::SettingsLogcatFilterField);
+                self.push_click(Rect::new(area.x + 1, save_row, area.width.saturating_sub(2), 1), ClickTarget::SettingsSave);
+
+                let media_focused = self.settings_focus == SettingsField::MediaDir;
+                let log_focused = self.settings_focus == SettingsField::LogDir;
+                let filter_focused = self.settings_focus == SettingsField::LogcatFilter;
+                let cursor = if self.settings_focus == SettingsField::None { "" } else { "▏" };
+                let cfg_path = Config::config_path().to_string_lossy().into_owned();
+
                 let text = vec![
                     Line::from(Span::styled("Settings", Style::default().add_modifier(Modifier::BOLD))),
                     Line::from(""),
-                    Line::from(vec![Span::styled("ADB:           ", Style::default().fg(Color::Gray)), Span::raw("system adb")]),
+                    Line::from(vec![
+                        Span::styled("Media save dir: ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            format!("{}{}", self.config.media_save_dir.to_string_lossy(), if media_focused { cursor } else { "" }),
+                            Style::default().fg(if media_focused { Color::Yellow } else { Color::White }),
+                        ),
+                    ]),
+                    Line::from(Span::styled("  where screenshots, media downloads, and pulled files land", Style::default().fg(Color::DarkGray))),
+                    Line::from(vec![
+                        Span::styled("Log save dir:   ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            format!("{}{}", self.config.log_save_dir.to_string_lossy(), if log_focused { cursor } else { "" }),
+                            Style::default().fg(if log_focused { Color::Yellow } else { Color::White }),
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Logcat filter:  ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            format!("{}{}", self.config.logcat_filter, if filter_focused { cursor } else { "" }),
+                            Style::default().fg(if filter_focused { Color::Yellow } else { Color::White }),
+                        ),
+                    ]),
+                    Line::from(Span::styled("  e.g. -s unity:V or -s '*:V' unity:E", Style::default().fg(Color::DarkGray))),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("[Tab] cycle fields  [Esc] done  [s] ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(if self.settings_dirty { "Save (unsaved)" } else { "Save" }, Style::default().fg(if self.settings_dirty { Color::Yellow } else { Color::Green }).add_modifier(Modifier::BOLD)),
+                    ]),
+                    Line::from(Span::styled(format!("Config file: {}", cfg_path), Style::default().fg(Color::DarkGray))),
+                    Line::from(""),
                     Line::from(vec![Span::styled("Poll interval: ", Style::default().fg(Color::Gray)), Span::raw("3s")]),
                     Line::from(vec![Span::styled("Log buffer:    ", Style::default().fg(Color::Gray)), Span::raw("2000 lines")]),
-                    Line::from(""),
-                    Line::from(Span::styled("Config persistence: not yet implemented", Style::default().fg(Color::DarkGray))),
                 ];
                 f.render_widget(
                     Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" Settings ")),
@@ -1569,146 +2060,194 @@ impl App {
         }
     }
 
-    fn draw_detail(&self, f: &mut Frame, area: Rect) {
+    fn draw_detail(&mut self, f: &mut Frame, area: Rect) {
+        let detail_top = area.y + 1;
+        let detail_inner_left = area.x + 1;
+        let detail_inner_w = area.width.saturating_sub(2);
+
         let lines: Vec<Line> = match self.view {
             View::Devices => {
-                if let Some(idx) = self.device_state.selected() {
-                    if let Some(d) = self.devices.get(idx) {
-                        let (ss, sc) = match d.status {
-                            DeviceStatus::Online => ("Online", Color::Green),
-                            DeviceStatus::Unauthorized => ("Unauthorized", Color::Yellow),
-                            DeviceStatus::Offline => ("Offline", Color::Red),
-                        };
-                        
-                        let mut lines = vec![
-                            Line::from(vec![
-                                Span::styled("Device Dashboard", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-                            ]),
-                            Line::from(""),
-                            Line::from(vec![
-                                Span::styled("  Model:           ", Style::default().fg(Color::Gray)), 
-                                Span::styled(d.model.as_deref().unwrap_or("Unknown"), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
-                            ]),
-                            Line::from(vec![
-                                Span::styled("  Serial:          ", Style::default().fg(Color::Gray)), 
-                                Span::raw(d.serial.as_deref().unwrap_or(&d.id))
-                            ]),
-                            Line::from(vec![
-                                Span::styled("  ADB ID:          ", Style::default().fg(Color::Gray)), 
-                                Span::raw(d.id.as_str())
-                            ]),
-                            Line::from(vec![
-                                Span::styled("  Status:          ", Style::default().fg(Color::Gray)), 
-                                Span::styled(ss, Style::default().fg(sc))
-                            ]),
-                            Line::from(vec![
-                                Span::styled("  Android Version: ", Style::default().fg(Color::Gray)), 
-                                Span::raw(d.android_version.as_deref().unwrap_or("—"))
-                            ]),
-                        ];
+                let device_snapshot = self.device_state.selected()
+                    .and_then(|i| self.devices.get(i))
+                    .map(|d| (
+                        d.model.clone().unwrap_or_else(|| "Unknown".to_string()),
+                        d.serial.clone().unwrap_or_else(|| d.id.clone()),
+                        d.id.clone(),
+                        d.status,
+                        d.android_version.clone().unwrap_or_else(|| "—".to_string()),
+                        d.connection_types.clone(),
+                        d.ip_address.clone(),
+                        d.battery_level,
+                        d.controller_battery_left,
+                        d.controller_battery_right,
+                    ));
+                if let Some((model, serial, id, status, android_version, connection_types, ip_address, battery_level, cb_left, cb_right)) = device_snapshot {
+                    let (ss, sc) = match status {
+                        DeviceStatus::Online => ("Online", Color::Green),
+                        DeviceStatus::Unauthorized => ("Unauthorized", Color::Yellow),
+                        DeviceStatus::Offline => ("Offline", Color::Red),
+                    };
 
-                        let conns = d.connection_types.join(" + ");
+                    let mut lines = vec![
+                        Line::from(vec![
+                            Span::styled("Device Dashboard", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                        ]),
+                        Line::from(""),
+                        Line::from(vec![
+                            Span::styled("  Model:           ", Style::default().fg(Color::Gray)),
+                            Span::styled(model, Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+                        ]),
+                        Line::from(vec![
+                            Span::styled("  Serial:          ", Style::default().fg(Color::Gray)),
+                            Span::raw(serial)
+                        ]),
+                        Line::from(vec![
+                            Span::styled("  ADB ID:          ", Style::default().fg(Color::Gray)),
+                            Span::raw(id)
+                        ]),
+                        Line::from(vec![
+                            Span::styled("  Status:          ", Style::default().fg(Color::Gray)),
+                            Span::styled(ss, Style::default().fg(sc))
+                        ]),
+                        Line::from(vec![
+                            Span::styled("  Android Version: ", Style::default().fg(Color::Gray)),
+                            Span::raw(android_version)
+                        ]),
+                    ];
+
+                    let conns = connection_types.join(" + ");
+                    lines.push(Line::from(vec![
+                        Span::styled("  Connection:      ", Style::default().fg(Color::Gray)),
+                        Span::styled(conns, Style::default().fg(Color::Cyan))
+                    ]));
+
+                    if let Some(ref ip) = ip_address {
                         lines.push(Line::from(vec![
-                            Span::styled("  Connection:      ", Style::default().fg(Color::Gray)),
-                            Span::styled(conns, Style::default().fg(Color::Cyan))
+                            Span::styled("  IP Address:      ", Style::default().fg(Color::Gray)),
+                            Span::styled(ip.clone(), Style::default().fg(Color::Green))
                         ]));
+                    }
 
-                        if let Some(ref ip) = d.ip_address {
+                    if battery_level != -1 {
+                        let bar_len = (battery_level / 10) as usize;
+                        let bar = format!("[{}{}] {}%", "█".repeat(bar_len), "░".repeat(10 - bar_len), battery_level);
+                        let bat_col = if battery_level < 20 { Color::Red } else { Color::Green };
+                        lines.push(Line::from(vec![
+                            Span::styled("  Headset Battery: ", Style::default().fg(Color::Gray)),
+                            Span::styled(bar, Style::default().fg(bat_col))
+                        ]));
+                    }
+
+                    if cb_left.is_some() || cb_right.is_some() {
+                        let mut ctrl_line = vec![Span::styled("  Controllers:     ", Style::default().fg(Color::Gray))];
+                        if let Some(l) = cb_left {
+                            ctrl_line.push(Span::styled(format!("L: {}%  ", l), Style::default().fg(Color::Cyan)));
+                        }
+                        if let Some(r) = cb_right {
+                            ctrl_line.push(Span::styled(format!("R: {}%", r), Style::default().fg(Color::Cyan)));
+                        }
+                        lines.push(Line::from(ctrl_line));
+                    }
+
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled("─── Quick Actions ────────────────────────", Style::default().fg(Color::DarkGray))));
+
+                    let is_wifi_active = connection_types.iter().any(|c| c == "WiFi");
+                    let has_ip = ip_address.is_some();
+                    let wifi_lbl = if is_wifi_active { "Wireless (active)" } else if has_ip { "Enable Wireless" } else { "Wireless (no IP)" };
+                    let wifi_color = if is_wifi_active { Color::Green } else { Color::White };
+                    let wifi_row = detail_top + (lines.len() as u16);
+                    lines.push(Line::from(vec![
+                        Span::styled("  [w] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                        Span::styled("Toggle Wi-Fi ADB: ", Style::default().fg(Color::Gray)),
+                        Span::styled(wifi_lbl, Style::default().fg(wifi_color))
+                    ]));
+                    self.push_click(Rect::new(detail_inner_left, wifi_row, detail_inner_w, 1), ClickTarget::WifiToggle);
+
+                    let boundary_lbl = if self.boundary_enabled { "Enabled" } else { "Disabled (Paused)" };
+                    let boundary_color = if self.boundary_enabled { Color::Green } else { Color::Yellow };
+                    let boundary_row = detail_top + (lines.len() as u16);
+                    lines.push(Line::from(vec![
+                        Span::styled("  [b] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                        Span::styled("Toggle Boundary:  ", Style::default().fg(Color::Gray)),
+                        Span::styled(boundary_lbl, Style::default().fg(boundary_color))
+                    ]));
+                    self.push_click(Rect::new(detail_inner_left, boundary_row, detail_inner_w, 1), ClickTarget::BoundaryToggle);
+
+                    let screenshot_row = detail_top + (lines.len() as u16);
+                    lines.push(Line::from(vec![
+                        Span::styled("  [s] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                        Span::styled("Take Screenshot   ", Style::default().fg(Color::White))
+                    ]));
+                    self.push_click(Rect::new(detail_inner_left, screenshot_row, detail_inner_w, 1), ClickTarget::Screenshot);
+
+                    let rec_lbl = if self.is_recording { "STOP Recording (saving...)" } else { "Start Video Recording" };
+                    let rec_color = if self.is_recording { Color::Red } else { Color::White };
+                    let record_row = detail_top + (lines.len() as u16);
+                    lines.push(Line::from(vec![
+                        Span::styled("  [v] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                        Span::styled("Record Video:     ", Style::default().fg(Color::Gray)),
+                        Span::styled(rec_lbl, Style::default().fg(rec_color))
+                    ]));
+                    self.push_click(Rect::new(detail_inner_left, record_row, detail_inner_w, 1), ClickTarget::RecordVideo);
+
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled("─── Recent Media Gallery ─────────────────", Style::default().fg(Color::DarkGray))));
+
+                    let media_snapshot: Vec<(String, bool)> = self.recent_media.iter().map(|m| {
+                        let is_mp4 = m.name.ends_with(".mp4");
+                        (m.name.clone(), is_mp4)
+                    }).collect();
+                    let selected_media_idx = self.selected_media_idx;
+
+                    let media_action_row: u16;
+                    if media_snapshot.is_empty() {
+                        lines.push(Line::from(Span::styled("  No media found on device.", Style::default().fg(Color::DarkGray))));
+                        media_action_row = 0;
+                    } else {
+                        let hint_row = detail_top + (lines.len() as u16);
+                        lines.push(Line::from(Span::styled("  [<] prev    [>] next  — click to step through media", Style::default().fg(Color::DarkGray))));
+                        // Left half = prev, right half = next
+                        let hint_mid = (detail_inner_w / 2).max(1);
+                        self.push_click(Rect::new(detail_inner_left, hint_row, hint_mid, 1), ClickTarget::MediaPrev);
+                        self.push_click(Rect::new(detail_inner_left + hint_mid, hint_row, detail_inner_w - hint_mid, 1), ClickTarget::MediaNext);
+
+                        for (i, (name, is_mp4)) in media_snapshot.iter().enumerate() {
+                            let is_sel = selected_media_idx == Some(i);
+                            let prefix = if is_sel { "> " } else { "  " };
+                            let style = if is_sel { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::White) };
+
+                            let file_type = if *is_mp4 { "🎥" } else { "📷" };
+                            let media_row = detail_top + (lines.len() as u16);
                             lines.push(Line::from(vec![
-                                Span::styled("  IP Address:      ", Style::default().fg(Color::Gray)),
-                                Span::styled(ip.as_str(), Style::default().fg(Color::Green))
+                                Span::styled(prefix, Style::default().fg(Color::Yellow)),
+                                Span::raw(format!("{} ", file_type)),
+                                Span::styled(name.clone(), style),
                             ]));
+                            self.push_click(Rect::new(detail_inner_left, media_row, detail_inner_w, 1), ClickTarget::MediaItem(i));
                         }
-
-                        if d.battery_level != -1 {
-                            let bar_len = (d.battery_level / 10) as usize;
-                            let bar = format!("[{}{}] {}%", "█".repeat(bar_len), "░".repeat(10 - bar_len), d.battery_level);
-                            let bat_col = if d.battery_level < 20 { Color::Red } else { Color::Green };
-                            lines.push(Line::from(vec![
-                                Span::styled("  Headset Battery: ", Style::default().fg(Color::Gray)),
-                                Span::styled(bar, Style::default().fg(bat_col))
-                            ]));
-                        }
-
-                        if d.controller_battery_left.is_some() || d.controller_battery_right.is_some() {
-                            let mut ctrl_line = vec![Span::styled("  Controllers:     ", Style::default().fg(Color::Gray))];
-                            if let Some(l) = d.controller_battery_left {
-                                ctrl_line.push(Span::styled(format!("L: {}%  ", l), Style::default().fg(Color::Cyan)));
-                            }
-                            if let Some(r) = d.controller_battery_right {
-                                ctrl_line.push(Span::styled(format!("R: {}%", r), Style::default().fg(Color::Cyan)));
-                            }
-                            lines.push(Line::from(ctrl_line));
-                        }
-
                         lines.push(Line::from(""));
-                        lines.push(Line::from(Span::styled("─── Quick Actions ────────────────────────", Style::default().fg(Color::DarkGray))));
-                        
-                        let is_wifi_active = d.connection_types.contains(&"WiFi".to_string());
-                        let wifi_lbl = if is_wifi_active { "Wireless (active)" } else if d.ip_address.is_some() { "Enable Wireless" } else { "Wireless (no IP)" };
-                        let wifi_color = if is_wifi_active { Color::Green } else { Color::White };
+                        media_action_row = detail_top + (lines.len() as u16);
                         lines.push(Line::from(vec![
-                            Span::styled("  [w] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                            Span::styled("Toggle Wi-Fi ADB: ", Style::default().fg(Color::Gray)),
-                            Span::styled(wifi_lbl, Style::default().fg(wifi_color))
+                            Span::styled("  [o] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                            Span::raw("Open    "),
+                            Span::styled("[d] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                            Span::raw("Download    "),
+                            Span::styled("[x] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                            Span::raw("Delete")
                         ]));
+                    }
 
-                        let boundary_lbl = if self.boundary_enabled { "Enabled" } else { "Disabled (Paused)" };
-                        let boundary_color = if self.boundary_enabled { Color::Green } else { Color::Yellow };
-                        lines.push(Line::from(vec![
-                            Span::styled("  [b] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                            Span::styled("Toggle Boundary:  ", Style::default().fg(Color::Gray)),
-                            Span::styled(boundary_lbl, Style::default().fg(boundary_color))
-                        ]));
+                    if !media_snapshot.is_empty() {
+                        self.push_click(Rect::new(detail_inner_left, media_action_row, 12, 1), ClickTarget::MediaOpen);
+                        self.push_click(Rect::new(detail_inner_left + 19, media_action_row, 18, 1), ClickTarget::MediaDownload);
+                        self.push_click(Rect::new(detail_inner_left + 38, media_action_row, 14, 1), ClickTarget::MediaDelete);
+                    }
 
-                        lines.push(Line::from(vec![
-                            Span::styled("  [s] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                            Span::styled("Take Screenshot   ", Style::default().fg(Color::White))
-                        ]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled("Enter/dbl-click device list → Switch to Apps view", Style::default().fg(Color::DarkGray))));
 
-                        let rec_lbl = if self.is_recording { "STOP Recording (saving...)" } else { "Start Video Recording" };
-                        let rec_color = if self.is_recording { Color::Red } else { Color::White };
-                        lines.push(Line::from(vec![
-                            Span::styled("  [v] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                            Span::styled("Record Video:     ", Style::default().fg(Color::Gray)),
-                            Span::styled(rec_lbl, Style::default().fg(rec_color))
-                        ]));
-
-                        lines.push(Line::from(""));
-                        lines.push(Line::from(Span::styled("─── Recent Media Gallery ─────────────────", Style::default().fg(Color::DarkGray))));
-                        if self.recent_media.is_empty() {
-                            lines.push(Line::from(Span::styled("  No media found on device.", Style::default().fg(Color::DarkGray))));
-                        } else {
-                            lines.push(Line::from(Span::styled("  Use [/] to select media item from list:", Style::default().fg(Color::DarkGray))));
-                            
-                            for (i, media) in self.recent_media.iter().enumerate() {
-                                let is_sel = self.selected_media_idx == Some(i);
-                                let prefix = if is_sel { "> " } else { "  " };
-                                let style = if is_sel { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::White) };
-                                
-                                let file_type = if media.name.ends_with(".mp4") { "🎥" } else { "📷" };
-                                lines.push(Line::from(vec![
-                                    Span::styled(prefix, Style::default().fg(Color::Yellow)),
-                                    Span::raw(format!("{} ", file_type)),
-                                    Span::styled(media.name.as_str(), style),
-                                ]));
-                            }
-                            lines.push(Line::from(""));
-                            lines.push(Line::from(vec![
-                                Span::styled("  [o] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                                Span::raw("Open    "),
-                                Span::styled("[d] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                                Span::raw("Download    "),
-                                Span::styled("[x] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-                                Span::raw("Delete")
-                            ]));
-                        }
-
-                        lines.push(Line::from(""));
-                        lines.push(Line::from(Span::styled("Enter/dbl-click device list → Switch to Apps view", Style::default().fg(Color::DarkGray))));
-
-                        lines
-                    } else { vec![Line::from("No device")] }
+                    lines
                 } else {
                     let inner_w = area.width.saturating_sub(2) as usize;
                     let pad_art = inner_w.saturating_sub(22) / 2;
@@ -1731,62 +2270,94 @@ impl App {
             }
 
             View::Apps => {
-                if let Some(idx) = self.app_state.selected() {
-                    if let Some(app) = self.apps.get(idx) {
-                        vec![
-                            Line::from(vec![Span::styled("Package: ", Style::default().fg(Color::Gray)), Span::styled(app.package.as_str(), Style::default().fg(Color::Cyan))]),
-                            Line::from(""),
-                            Line::from(Span::styled("Enter / dbl-click → launch", Style::default().fg(Color::DarkGray))),
-                            Line::from(Span::styled("u → uninstall", Style::default().fg(Color::DarkGray))),
-                        ]
-                    } else { vec![Line::from("No app selected")] }
-                } else { vec![Line::from(Span::styled("Select device first", Style::default().fg(Color::DarkGray)))] }
+                let pkg_line = if let Some(idx) = self.app_state.selected() {
+                    let pkg = self.apps.get(idx).map(|a| a.package.clone());
+                    if let Some(pkg) = pkg {
+                        Line::from(vec![Span::styled("Package: ", Style::default().fg(Color::Gray)), Span::styled(pkg, Style::default().fg(Color::Cyan))])
+                    } else {
+                        Line::from("No app selected")
+                    }
+                } else {
+                    Line::from(Span::styled("Select device first", Style::default().fg(Color::DarkGray)))
+                };
+                let action_line = Line::from(vec![
+                    Span::styled("  [Enter] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::raw("Launch   "),
+                    Span::styled("[u] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::raw("Uninstall   "),
+                    Span::styled("[f] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::raw("Force-stop"),
+                ]);
+                let action_row = detail_top + 2;
+                self.push_click(Rect::new(detail_inner_left,     action_row, 16, 1), ClickTarget::AppsLaunch);
+                self.push_click(Rect::new(detail_inner_left + 17, action_row, 16, 1), ClickTarget::AppsUninstall);
+                self.push_click(Rect::new(detail_inner_left + 34, action_row, 18, 1), ClickTarget::AppsForceStop);
+                vec![pkg_line, Line::from(""), action_line]
             }
 
             View::Files => {
                 let sel_count = self.selected_files.len();
                 let mut lines = vec![];
                 if sel_count > 0 {
+                    let preview: Vec<String> = self.selected_files.iter().take(10)
+                        .filter_map(|&i| self.files.get(i).map(|f| f.name.clone()))
+                        .collect();
                     lines.push(Line::from(vec![
                         Span::styled("Selected: ", Style::default().fg(Color::Gray)),
                         Span::styled(format!("{} file(s)", sel_count), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
                     ]));
                     lines.push(Line::from(""));
+                    let dl_row = detail_top + (lines.len() as u16);
                     lines.push(Line::from(Span::styled(
-                        "d → Download all to ~/Downloads",
+                        "[d] Download all to ~/Downloads",
                         Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
                     )));
-                    lines.push(Line::from(Span::styled("a → select/deselect all", Style::default().fg(Color::DarkGray))));
+                    let sa_row = detail_top + (lines.len() as u16);
+                    lines.push(Line::from(Span::styled("[a] select/deselect all", Style::default().fg(Color::DarkGray))));
+                    self.push_click(Rect::new(detail_inner_left, dl_row, detail_inner_w, 1), ClickTarget::FilesDownloadSelected);
+                    self.push_click(Rect::new(detail_inner_left, sa_row, detail_inner_w, 1), ClickTarget::FilesSelectAll);
                     lines.push(Line::from(""));
-                    // Preview list
-                    for &idx in self.selected_files.iter().take(10) {
-                        if let Some(f) = self.files.get(idx) {
-                            lines.push(Line::from(vec![
-                                Span::styled("  ✓ ", Style::default().fg(Color::Green)),
-                                Span::raw(f.name.as_str()),
-                            ]));
-                        }
+                    for name in preview {
+                        lines.push(Line::from(vec![
+                            Span::styled("  ✓ ", Style::default().fg(Color::Green)),
+                            Span::raw(name),
+                        ]));
                     }
                     if sel_count > 10 {
                         lines.push(Line::from(Span::styled(format!("  … and {} more", sel_count - 10), Style::default().fg(Color::DarkGray))));
                     }
                 } else if let Some(idx) = self.file_state.selected() {
-                    if let Some(file) = self.files.get(idx) {
-                        lines.push(Line::from(vec![Span::styled("Name: ", Style::default().fg(Color::Gray)), Span::styled(file.name.as_str(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))]));
-                        lines.push(Line::from(vec![Span::styled("Type: ", Style::default().fg(Color::Gray)), Span::raw(if file.is_dir { "Directory" } else { "File" })]));
-                        if let Some(sz) = file.size {
+                    let file_data: Option<(String, bool, Option<u64>)> = self.files.get(idx).map(|f| (f.name.clone(), f.is_dir, f.size));
+                    if let Some((name, is_dir, size)) = file_data {
+                        lines.push(Line::from(vec![Span::styled("Name: ", Style::default().fg(Color::Gray)), Span::styled(name.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))]));
+                        lines.push(Line::from(vec![Span::styled("Type: ", Style::default().fg(Color::Gray)), Span::raw(if is_dir { "Directory" } else { "File" })]));
+                        if let Some(sz) = size {
                             lines.push(Line::from(vec![Span::styled("Size: ", Style::default().fg(Color::Gray)), Span::raw(format_bytes(sz))]));
                         }
                         lines.push(Line::from(""));
-                        if file.is_dir {
-                            lines.push(Line::from(Span::styled("Enter / dbl-click → open", Style::default().fg(Color::DarkGray))));
-                            lines.push(Line::from(Span::styled("Esc → go up", Style::default().fg(Color::DarkGray))));
+                        if is_dir {
+                            lines.push(Line::from(Span::styled("[Enter] open", Style::default().fg(Color::DarkGray))));
+                            let go_up_row = detail_top + (lines.len() as u16);
+                            lines.push(Line::from(Span::styled("[Esc] go up", Style::default().fg(Color::DarkGray))));
+                            if self.current_path != "/" {
+                                self.push_click(Rect::new(detail_inner_left, go_up_row, detail_inner_w, 1), ClickTarget::FilesGoUp);
+                            }
                         } else {
-                            lines.push(Line::from(Span::styled("Space / [✓] → select", Style::default().fg(Color::DarkGray))));
-                            lines.push(Line::from(Span::styled("p / Enter → pull single file", Style::default().fg(Color::DarkGray))));
-                            lines.push(Line::from(Span::styled("d → download selected", Style::default().fg(Color::DarkGray))));
+                            lines.push(Line::from(Span::styled("[Space] select", Style::default().fg(Color::DarkGray))));
+                            let pull_row = detail_top + (lines.len() as u16);
+                            lines.push(Line::from(Span::styled("[p / Enter] pull single file", Style::default().fg(Color::DarkGray))));
+                            let dl_row = detail_top + (lines.len() as u16);
+                            lines.push(Line::from(Span::styled("[d] download selected", Style::default().fg(Color::DarkGray))));
+                            let del_row = detail_top + (lines.len() as u16);
+                            lines.push(Line::from(Span::styled("[x / Delete] delete", Style::default().fg(Color::DarkGray))));
+                            self.push_click(Rect::new(detail_inner_left, pull_row, detail_inner_w, 1), ClickTarget::FilesPullSingle);
+                            self.push_click(Rect::new(detail_inner_left, dl_row, detail_inner_w, 1), ClickTarget::FilesDownloadSelected);
+                            self.push_click(Rect::new(detail_inner_left, del_row, detail_inner_w, 1), ClickTarget::FilesDelete);
+                            let _ = name;
                         }
-                        lines.push(Line::from(Span::styled("a → toggle select all", Style::default().fg(Color::DarkGray))));
+                        let sa_row = detail_top + (lines.len() as u16);
+                        lines.push(Line::from(Span::styled("[a] toggle select all", Style::default().fg(Color::DarkGray))));
+                        self.push_click(Rect::new(detail_inner_left, sa_row, detail_inner_w, 1), ClickTarget::FilesSelectAll);
                     }
                 } else {
                     lines.push(Line::from(Span::styled("No device selected", Style::default().fg(Color::DarkGray))));
@@ -1796,10 +2367,11 @@ impl App {
 
             View::Install => {
                 let sel_count = self.selected_local.len();
+                let local_path = self.local_path.clone();
                 let mut lines = vec![
                     Line::from(Span::styled("Install APKs to device", Style::default().add_modifier(Modifier::BOLD))),
                     Line::from(""),
-                    Line::from(vec![Span::styled("Path: ", Style::default().fg(Color::Gray)), Span::styled(self.local_path.as_str(), Style::default().fg(Color::White))]),
+                    Line::from(vec![Span::styled("Path: ", Style::default().fg(Color::Gray)), Span::styled(local_path, Style::default().fg(Color::White))]),
                     Line::from(""),
                 ];
                 if self.selected_device_id().is_none() {
@@ -1807,23 +2379,27 @@ impl App {
                     lines.push(Line::from(""));
                 }
                 if sel_count > 0 {
+                    let preview: Vec<String> = self.selected_local.iter().take(8)
+                        .filter_map(|&i| self.local_files.get(i).map(|f| f.name.clone()))
+                        .collect();
                     lines.push(Line::from(vec![
                         Span::styled("Selected: ", Style::default().fg(Color::Gray)),
                         Span::styled(format!("{} APK(s)", sel_count), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
                     ]));
                     lines.push(Line::from(""));
+                    let btn_row = detail_top + (lines.len() as u16);
                     lines.push(Line::from(vec![
                         Span::styled("[ i ] → Install selected APKs   ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                         Span::styled("[ u ] → Push files to device", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
                     ]));
+                    self.push_click(Rect::new(detail_inner_left, btn_row,  34, 1), ClickTarget::InstallSelected);
+                    self.push_click(Rect::new(detail_inner_left + 34, btn_row, 30, 1), ClickTarget::InstallPush);
                     lines.push(Line::from(""));
-                    for &idx in self.selected_local.iter().take(8) {
-                        if let Some(f) = self.local_files.get(idx) {
-                            lines.push(Line::from(vec![
-                                Span::styled("  ✓ ", Style::default().fg(Color::Green)),
-                                Span::raw(f.name.as_str()),
-                            ]));
-                        }
+                    for name in preview {
+                        lines.push(Line::from(vec![
+                            Span::styled("  ✓ ", Style::default().fg(Color::Green)),
+                            Span::raw(name),
+                        ]));
                     }
                     if sel_count > 8 {
                         lines.push(Line::from(Span::styled(format!("  … and {} more", sel_count - 8), Style::default().fg(Color::DarkGray))));
@@ -1833,36 +2409,51 @@ impl App {
                     lines.push(Line::from(""));
                     lines.push(Line::from(Span::styled("1. Browse to your local files", Style::default().fg(Color::DarkGray))));
                     lines.push(Line::from(Span::styled("2. Space / [✓] click → select file(s)", Style::default().fg(Color::DarkGray))));
-                    lines.push(Line::from(Span::styled("3. a → select all in dir", Style::default().fg(Color::DarkGray))));
-                    lines.push(Line::from(Span::styled("4. i → install selected APKs", Style::default().fg(Color::DarkGray))));
-                    lines.push(Line::from(Span::styled("5. u → push selected files to device current dir", Style::default().fg(Color::DarkGray))));
+                    let sa_row = detail_top + (lines.len() as u16);
+                    lines.push(Line::from(Span::styled("3. [a] select all in dir", Style::default().fg(Color::DarkGray))));
+                    lines.push(Line::from(Span::styled("4. [i] install selected APKs", Style::default().fg(Color::DarkGray))));
+                    lines.push(Line::from(Span::styled("5. [u] push selected files to device current dir", Style::default().fg(Color::DarkGray))));
                     lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled("Enter on APK → install immediately", Style::default().fg(Color::DarkGray))));
-                    lines.push(Line::from(Span::styled("Enter / dbl-click dir → navigate", Style::default().fg(Color::DarkGray))));
-                    lines.push(Line::from(Span::styled("Esc → go up one level", Style::default().fg(Color::DarkGray))));
+                    lines.push(Line::from(Span::styled("[Enter] on APK → install immediately", Style::default().fg(Color::DarkGray))));
+                    lines.push(Line::from(Span::styled("[Enter] / dbl-click dir → navigate", Style::default().fg(Color::DarkGray))));
+                    lines.push(Line::from(Span::styled("[Esc] go up one level", Style::default().fg(Color::DarkGray))));
+                    self.push_click(Rect::new(detail_inner_left, sa_row, detail_inner_w, 1), ClickTarget::InstallSelectAll);
                 }
                 lines
             }
 
-            View::Logcat => vec![
-                Line::from(Span::styled("Controls", Style::default().add_modifier(Modifier::BOLD))),
-                Line::from(""),
-                Line::from(vec![Span::styled("↑/↓ scroll    ", Style::default().fg(Color::Gray)), Span::raw("line")]),
-                Line::from(vec![Span::styled("PgUp/PgDn     ", Style::default().fg(Color::Gray)), Span::raw("±20 lines")]),
-                Line::from(vec![Span::styled("s             ", Style::default().fg(Color::Gray)), Span::raw("toggle auto-scroll")]),
-                Line::from(vec![Span::styled("p             ", Style::default().fg(Color::Gray)), Span::raw("start/pause stream")]),
-                Line::from(vec![Span::styled("c             ", Style::default().fg(Color::Gray)), Span::raw("clear buffer")]),
-                Line::from(vec![Span::styled("r             ", Style::default().fg(Color::Gray)), Span::raw("restart stream")]),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("Status: ", Style::default().fg(Color::Gray)),
-                    Span::styled(
-                        if self.logcat_receiver.is_some() { "streaming" } else { "stopped" },
-                        Style::default().fg(if self.logcat_receiver.is_some() { Color::Green } else { Color::Red }),
-                    ),
-                ]),
-                Line::from(vec![Span::styled("Lines:  ", Style::default().fg(Color::Gray)), Span::raw(self.log_lines.len().to_string())]),
-            ],
+            View::Logcat => {
+                let p_row  = detail_top + 4;
+                let c_row  = detail_top + 5;
+                let w_row  = detail_top + 6;
+                let r_row  = detail_top + 7;
+                self.push_click(Rect::new(detail_inner_left, p_row, detail_inner_w, 1), ClickTarget::LogcatPause);
+                self.push_click(Rect::new(detail_inner_left, c_row, detail_inner_w, 1), ClickTarget::LogcatClear);
+                self.push_click(Rect::new(detail_inner_left, w_row, detail_inner_w, 1), ClickTarget::LogcatSave);
+                self.push_click(Rect::new(detail_inner_left, r_row, detail_inner_w, 1), ClickTarget::LogcatRestart);
+
+                let streaming = self.logcat_receiver.is_some();
+                let status_text = if streaming { "▶ streaming" } else { "■ stopped" };
+                let status_color = if streaming { Color::Green } else { Color::Red };
+
+                vec![
+                    Line::from(Span::styled("Controls", Style::default().add_modifier(Modifier::BOLD))),
+                    Line::from(""),
+                    Line::from(vec![Span::styled("↑/↓  ", Style::default().fg(Color::Gray)), Span::raw("scroll line")]),
+                    Line::from(vec![Span::styled("PgUp/Dn ", Style::default().fg(Color::Gray)), Span::raw("±20 lines")]),
+                    Line::from(vec![Span::styled("[p] ", Style::default().fg(Color::Cyan)), Span::raw(if streaming { "stop" } else { "start" })]),
+                    Line::from(vec![Span::styled("[c] ", Style::default().fg(Color::Cyan)), Span::raw("clear buffer")]),
+                    Line::from(vec![Span::styled("[w] ", Style::default().fg(Color::Cyan)), Span::raw("save → file")]),
+                    Line::from(vec![Span::styled("[r] ", Style::default().fg(Color::Cyan)), Span::raw("restart")]),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("Status: ", Style::default().fg(Color::Gray)),
+                        Span::styled(status_text, Style::default().fg(status_color)),
+                    ]),
+                    Line::from(vec![Span::styled("Lines:  ", Style::default().fg(Color::Gray)), Span::raw(self.log_lines.len().to_string())]),
+                    Line::from(vec![Span::styled("Save→  ", Style::default().fg(Color::Gray)), Span::raw(self.config.log_save_dir.to_string_lossy().to_string())]),
+                ]
+            },
 
             View::Settings => vec![Line::from(Span::styled("Press ? for help", Style::default().fg(Color::DarkGray)))],
         };
@@ -1875,7 +2466,7 @@ impl App {
         );
     }
 
-    fn draw_confirm(&self, f: &mut Frame, area: Rect) {
+    fn draw_confirm(&mut self, f: &mut Frame, area: Rect) {
         let popup = centered_rect(55, 30, area);
         let action_text = match self.confirm.as_ref().unwrap() {
             ConfirmAction::UninstallApp(pkg) => format!("Uninstall  {}", pkg),
@@ -1891,6 +2482,9 @@ impl App {
                 Span::styled(format!("{:^width$}", "[n] No", width = half as usize), Style::default().fg(Color::Red)),
             ]),
         ];
+        let btn_row = popup.y + popup.height - 2;
+        self.push_click(Rect::new(popup.x + 1,             btn_row, half, 1), ClickTarget::ConfirmYes);
+        self.push_click(Rect::new(popup.x + 1 + half,      btn_row, popup.width.saturating_sub(1 + half), 1), ClickTarget::ConfirmNo);
         f.render_widget(Clear, popup);
         f.render_widget(
             Paragraph::new(text)
@@ -1900,7 +2494,7 @@ impl App {
         );
     }
 
-    fn draw_help(&self, f: &mut Frame, area: Rect) {
+    fn draw_help(&mut self, f: &mut Frame, area: Rect) {
         let popup = centered_rect(60, 90, area);
         let key = Style::default().fg(Color::Cyan);
         let hdr = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
@@ -1940,10 +2534,17 @@ impl App {
             Line::from(vec![Span::styled("  u                  ", key), Span::raw("uninstall")]),
             Line::from(""),
             Line::from(Span::styled("  Logcat", hdr)),
-            Line::from(vec![Span::styled("  s / c              ", key), Span::raw("auto-scroll / clear")]),
+            Line::from(vec![Span::styled("  p / c / w          ", key), Span::raw("start+stop / clear / save to file")]),
+            Line::from(vec![Span::styled("  s / r              ", key), Span::raw("auto-scroll / restart")]),
+            Line::from(vec![Span::styled("  Tab on filter      ", key), Span::raw("edit filter (e.g. -s unity)")]),
+            Line::from(""),
+            Line::from(Span::styled("  Settings", hdr)),
+            Line::from(vec![Span::styled("  Tab / Esc          ", key), Span::raw("cycle fields / exit edit")]),
+            Line::from(vec![Span::styled("  s                  ", key), Span::raw("save config to disk")]),
             Line::from(""),
             Line::from(Span::styled("  any key or click to close", dim)),
         ];
+        self.push_click(popup, ClickTarget::HelpClose);
         f.render_widget(Clear, popup);
         f.render_widget(
             Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" Help ").style(Style::default().bg(Color::Black))),
@@ -2011,6 +2612,7 @@ fn main() -> Result<()> {
     let mut app = App::new();
     app.refresh_devices();
     app.refresh_local_files();
+    app.refresh_recent_media();
 
     let result = run_loop(&mut terminal, &mut app);
 
