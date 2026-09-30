@@ -1,93 +1,95 @@
-# OpenQuest Hub TUI - Задачи
+# OpenQuest TUI — Todo
 
-## Фаза 1: Инфраструктура
+## ✅ Сделано
 
-- [ ] Создать структуру Rust проекта для TUI (`cargo new openquest-tui`)
-- [ ] Добавить зависимости в Cargo.toml: ratatui, tokio, serde, crossterm
-- [ ] Настроить логирование (tracing)
-- [ ] Создать базовую структуру приложения (app state, run loop)
+### Ядро
+- Rust + ratatui 0.28 + crossterm 0.28
+- Tabs навигация (Devices / Apps / Files / Logcat / Settings)
+- Sidebar (список) + main area (детали) + status bar
+- Arrow keys навигация, Enter, Tab/BackTab
 
-## Фаза 2: ADB Integration
+### ADB модули
+- `devices.rs` — `adb devices -l`, парсинг статуса + `DeviceStatus` enum
+- `apps.rs` — `adb shell pm list packages -3` + `uninstall_app` + `launch_app`
+- `files.rs` — `adb shell ls -la` + навигация по папкам + `pull_file()`
+- `logcat.rs` — BufReader стриминг в отдельном треде + `clear_logcat()`
 
-- [ ] Скопировать/адаптировать ADB модули из `src-tauri/src/adb/`
-- [ ] Реализовать `adb::find_adb()` - поиск ADB бинарника
-- [ ] Реализовать `adb::devices::list_devices()` - получение списка устройств
-- [ ] Реализовать пулы для всех команд (apps, files, logcat, controls)
+### Управление (полный список)
+- Tab / BackTab — переключение вкладок
+- ↑ / ↓ — навигация по спискам / скролл logcat
+- PgUp / PgDn — скролл logcat ±20 строк
+- Enter — выбор устройства / вход в папку / запуск logcat / запуск приложения
+- Esc — выйти из папки на уровень выше
+- r — обновить текущий вид
+- p — pull файла → ~/Downloads (Files)
+- u — uninstall приложения (Apps) с confirm диалогом
+- d — delete файла/папки с confirm диалогом
+- c — очистить logcat
+- s — toggle auto-scroll logcat
+- ? — help popup
+- q / Ctrl+C — выход
 
-## Фаза 3: Layout и Навигация
-
-- [ ] Создать layout: sidebar (слева) + main area (справа)
-- [ ] Реализовать навигацию lazygit-style:
-  - Tab для переключения между sidebar/main
-  - Стрелки для навигации по спискам
-  - Enter для подтверждения выбора
-  - Поддержка мыши (click)
-- [ ] Sidebar: 5 пунктов (Devices, Apps, Files, Logcat, Settings)
-- [ ] Status bar ( снизу): выбранное устройство, статус подключения
-
-## Фаза 4: Views
-
-### Devices View
-- [ ] Список устройств с статусом (Online 🟢, Unauthorized 🔴, Offline ⚫)
-- [ ] Информация о выбранном устройстве (модель, Android версия, батарея)
-- [ ] Actions панель: Refresh, Screenshot, Record, WiFi ADB, Boundary toggle
-
-### Apps View
-- [ ] Список установленных пакетов (Package.name, label, version)
-- [ ] Поиск/фильтр пакетов
-- [ ] Actions: Launch (Enter), Stop, Uninstall
-- [ ] Установка APK+OBB через встроенный файловый браузер
-
-### Files View
-- [ ] Встроенный файловый браузер (/sdcard)
-- [ ] Навигация: cd, cd .., списки файлов
-- [ ] Множественный выбор: Space = mark, Enter = confirm
-- [ ] Скачивание файлов (pull)
-- [ ] Быстрые ссылки: Screenshots, VideoShots, Oculus, DCIM
-
-### Logcat View
-- [ ] Реаль-time стрим логов
-- [ ] Фильтры по уровню (V/D/I/W/E/F)
-- [ ] Фильтр по тегу (search)
-- [ ] Очистка (Ctrl+C)
-- [ ] Экспорт в файл
-
-### Settings View
-- [ ] ADB Path override
-- [ ] Device polling interval (slider 1-10 сек)
-- [ ] Max logcat lines
-- [ ] Download directory (file picker)
-- [ ] ADB Status диагностика
-
-## Фаза 5: Device Actions
-
-- [ ] Screenshot - `adb shell screencap`
-- [ ] Record video - `adb shell screenrecord`
-- [ ] Toggle Boundary (Quest) - `adb shell setprop guardian.system_switch 0/1`
-- [ ] WiFi ADB setup - `adb tcpip 5555`, подключение по IP
-- [ ] Delete remote media
-
-## Фаза 6: UX и Polish
-
-- [ ] Notification/Toast система в терминале
-- [ ] Progress bars для долгих операций
-- [ ] Keyboard shortcuts (справка = ?)
-- [ ] Обработка ошибок (async Result -> UI feedback)
-- [ ] Graceful shutdown (kill logcat processes, adb kill-server)
-
-## Фаза 7: Сборка
-
-- [ ] Cargo build --release
-- [ ] Тестирование всех вьюх
-- [ ] Чистка кода
-- [ ] README для TUI версии
+### UX / Интерфейс
+- `ListState` из ratatui — нативное выделение строк (вместо ручного `●/○`)
+- Цвета статуса устройств (● Online=зелёный, ◐ Unauthorized=жёлтый, ○ Offline=красный)
+- Цвета logcat по уровню (E=красный, W=жёлтый, I=белый, D=голубой, V=серый)
+- Notification/toast исчезает через 3 сек
+- Confirm диалог (y/n/Esc) перед uninstall/delete
+- Help popup по `?`
+- Breadcrumb текущего пути в заголовке Files
+- Авто-выбор первого online устройства при старте
+- Авто-скролл logcat с toggle (`s`)
+- Скролл logcat PgUp/PgDn
+- Реальное имя модели через getprop (ro.product.model + ro.build.version.release)
+- Нет warnings в коде
 
 ---
 
-## Технические решения
+## 🚧 Оставшийся функционал
 
-- **Фреймворк**: ratatui (см. вопросы)
-- **Навигация**: lazygit-style (Tab + arrows + mouse)
-- **File picker**: встроенный браузер с множественным выбором (Space + Enter)
-- **Скринкастинг**: вырезан (см. вопросы)
-- **ADB**: переиспользовать логику из src-tauri/adb/*.rs
+### Devices
+- [ ] Battery level в Device Info (`adb shell dumpsys battery | grep level`)
+- [ ] Serial number
+
+### Apps
+- [ ] Поиск/фильтрация по имени пакета (ввод текста)
+- [ ] Toggle: все пакеты / только сторонние / системные
+
+### Files
+- [ ] Push файла на устройство (`adb push`)
+- [ ] Дата модификации в списке файлов (парсинг `ls -la`)
+- [ ] Прогресс-бар при pull больших файлов
+
+### Logcat
+- [ ] Фильтрация по тегу / уровню (ввод текста)
+- [ ] Экспорт в файл (сохранить буфер)
+
+### Settings
+- [ ] Сохранение конфига в `~/.config/openquest-tui/config.toml`
+- [ ] Настройки: путь adb, интервал poll, лимит строк
+
+### Архитектура
+- [ ] Разбить `main.rs` (600+ строк) на `app.rs` + `ui.rs`
+- [ ] `serde` + `toml` для конфига
+
+---
+
+## Запуск
+```bash
+cd openquest-tui
+cargo run --release
+```
+
+## Структура проекта
+```
+openquest-tui/
+├── Cargo.toml
+└── src/
+    ├── main.rs          # App state, event loop, draw (всё в одном файле)
+    └── adb/
+        ├── mod.rs
+        ├── devices.rs   # DeviceStatus enum, getprop model/android
+        ├── apps.rs      # list + uninstall + launch
+        ├── files.rs     # browse + pull_file
+        └── logcat.rs    # BufReader streaming + clear
+```
