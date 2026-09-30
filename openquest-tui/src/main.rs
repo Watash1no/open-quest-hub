@@ -2455,7 +2455,46 @@ impl App {
                 ]
             },
 
-            View::Settings => vec![Line::from(Span::styled("Press ? for help", Style::default().fg(Color::DarkGray)))],
+            View::Settings => vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  ☕ Support Development",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  If openquest-tui saves you time, consider",
+                    Style::default().fg(Color::Gray),
+                )),
+                Line::from(Span::styled(
+                    "  buying me a coffee:",
+                    Style::default().fg(Color::Gray),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "    https://buymeacoffee.com/watash1no",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::UNDERLINED),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Donation perks include:",
+                    Style::default().fg(Color::Gray),
+                )),
+                Line::from(vec![
+                    Span::styled("    ", Style::default()),
+                    Span::styled("☕ ", Style::default().fg(Color::Yellow)),
+                    Span::styled("Standalone APK build", Style::default().fg(Color::White)),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Copy the URL above and open it in your",
+                    Style::default().fg(Color::DarkGray),
+                )),
+                Line::from(Span::styled(
+                    "  browser to support development.",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ],
         };
 
         f.render_widget(
