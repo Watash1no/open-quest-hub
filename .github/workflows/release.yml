@@ -52,6 +52,44 @@ jobs:
       - name: install frontend dependencies
         run: npm install
 
+      - name: verify tauri-cli version (>=2.11.4 required for AppImage .DirIcon fix, see tauri#15488)
+        run: |
+          set -e
+          VERSION=$(npx --no-install tauri --version 2>/dev/null | awk '{print $2}')
+          echo "Installed @tauri-apps/cli: $VERSION"
+          if [ -z "$VERSION" ]; then
+            echo "::error::tauri-cli not found after npm install"
+            exit 1
+          fi
+          # Compare semver: require >= 2.11.4
+          node -e "
+            const v = '$VERSION'.split('.').map(Number);
+            const need = [2, 11, 4];
+            const ok = v[0] > need[0] || (v[0] === need[0] && (v[1] > need[1] || (v[1] === need[1] && v[2] >= need[2])));
+            if (!ok) { console.error('::error::tauri-cli $VERSION is too old, need >= 2.11.4 for AppImage .DirIcon fix'); process.exit(1); }
+          "
+
+      - name: build openquest-tui
+        run: cargo build --manifest-path openquest-tui/Cargo.toml --release
+
+      - name: rename TUI binary for release upload
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              mv openquest-tui/target/release/openquest-tui openquest-tui/target/release/openquest-tui-linux-x86_64
+              echo "TUI_BINARY=openquest-tui/target/release/openquest-tui-linux-x86_64" >> "$GITHUB_ENV"
+              ;;
+            macOS)
+              mv openquest-tui/target/release/openquest-tui openquest-tui/target/release/openquest-tui-macos-aarch64
+              echo "TUI_BINARY=openquest-tui/target/release/openquest-tui-macos-aarch64" >> "$GITHUB_ENV"
+              ;;
+            Windows)
+              mv openquest-tui/target/release/openquest-tui.exe openquest-tui/target/release/openquest-tui-windows-x86_64.exe
+              echo "TUI_BINARY=openquest-tui/target/release/openquest-tui-windows-x86_64.exe" >> "$GITHUB_ENV"
+              ;;
+          esac
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,3 +100,12 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: upload openquest-tui binary to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: ${{ env.TUI_BINARY }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

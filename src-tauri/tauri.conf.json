@@ -57,6 +57,13 @@
         }
       }
     },
-    "resources": []
+    "resources": [],
+    "linux": {
+      "appimage": {
+        "files": {
+          "/.DirIcon": "icons/icon.png"
+        }
+      }
+    }
   }
 }
