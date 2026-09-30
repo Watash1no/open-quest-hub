@@ -53,6 +53,7 @@ jobs:
         run: npm install
 
       - name: verify tauri-cli version (>=2.11.4 required for AppImage .DirIcon fix, see tauri#15488)
+        shell: bash
         run: |
           set -e
           VERSION=$(npx --no-install tauri --version 2>/dev/null | awk '{print $2}')
