@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-09-30
+
+### Added
+- **TUI Settings → Support Development panel.** Right detail pane on the
+  Settings tab now displays a Buy Me a Coffee link
+  (`https://buymeacoffee.com/watash1no`) with the standalone APK build
+  listed as a donation perk. Replaces the previous "Press ? for help"
+  placeholder.
+
+### Fixed
+- **Release workflow TUI upload retry.** Replaced
+  `softprops/action-gh-release@v2` with `gh release upload` in a
+  5-attempt retry loop. v1.1.0's macOS/Windows matrix jobs raced
+  against each other and the linux job on the Releases API, leaving
+  `openquest-tui-windows-x86_64.exe` out of the release. The new
+  upload step uses the official GitHub CLI (no Node-version drift) and
+  retries with 15s backoff to ride out concurrent upload contention.
+
 ## [1.1.0] — 2026-09-30
 
 ### Added
@@ -37,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Standalone `openquest-tui` crate for headless / SSH workflows (ships source-only
   at this point; binaries land in [1.1.0] above).
 
-[Unreleased]: https://github.com/Watash1no/open-quest-hub/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Watash1no/open-quest-hub/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/Watash1no/open-quest-hub/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Watash1no/open-quest-hub/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Watash1no/open-quest-hub/releases/tag/v1.0.0
